@@ -7,6 +7,7 @@ from PIL import Image, ImageTk
 
 import detailed_holistic_tracker as core
 from emotion_recognizer import EmotionRecognizer
+from project_version import __version__
 
 
 DISPLAY_WIDTH = 960
@@ -36,7 +37,7 @@ LABEL_STATUS = "\uc0c1\ud0dc"
 class HolisticGuiApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Holistic Tracking GUI")
+        self.root.title(f"Holistic Tracking GUI v{__version__}")
         self.root.geometry("1420x860")
         self.root.configure(bg="#101418")
 
