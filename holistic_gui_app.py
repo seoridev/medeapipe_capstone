@@ -1,3 +1,4 @@
+from collections import deque
 import tkinter as tk
 from types import SimpleNamespace
 
@@ -25,6 +26,10 @@ LABEL_MODE = "\ubaa8\ub4dc"
 LABEL_RPS = "\uac00\uc704\ubc14\uc704\ubcf4"
 LABEL_CHAM = "\ucc38\ucc38\ucc38"
 LABEL_AIR = "\uc5d0\uc5b4\ub4dc\ub85c\uc789"
+LABEL_WAVE = "\uc190 \ud754\ub4e4\uae30"
+LABEL_HAND_GESTURE = "\uc5c4\uc9c0\ucc99/\ud558\ud2b8/OK"
+LABEL_HEAD_GESTURE = "\uace0\uac1c \ub044\ub355/\uc813\uae30"
+LABEL_ATTENTION = "\uc751\uc2dc/\uc790\ub9ac\ube44\uc6c0"
 LABEL_TOGGLES = "\ud1a0\uae00"
 LABEL_TRACKING = "\ud2b8\ub798\ud0b9 \ud45c\uc2dc"
 LABEL_MARKER_ONLY = "\uac80\uc740\ud654\uba74 \ub9c8\ucee4\ub9cc"
@@ -32,6 +37,16 @@ LABEL_MIRROR = "\uc88c\uc6b0 \ubc18\uc804"
 LABEL_INFO_OVERLAY = "\uc88c\uce21 \uc0c1\ub2e8 \uc815\ubcf4"
 LABEL_EMOTION = "\uac10\uc815 \uc778\uc2dd"
 LABEL_STATUS = "\uc0c1\ud0dc"
+
+MODE_LABELS = {
+    "rps": LABEL_RPS,
+    "cham": LABEL_CHAM,
+    "air": LABEL_AIR,
+    "wave": LABEL_WAVE,
+    "gesture": LABEL_HAND_GESTURE,
+    "head": LABEL_HEAD_GESTURE,
+    "attention": LABEL_ATTENTION,
+}
 
 
 class HolisticGuiApp:
@@ -56,6 +71,9 @@ class HolisticGuiApp:
         self.active_mode = "rps"
         self.air_paths = {"left": [], "right": []}
         self.air_max_points = 180
+        self.wave_histories = {"left": deque(maxlen=30), "right": deque(maxlen=30)}
+        self.head_history = deque(maxlen=36)
+        self.away_frame_count = 0
         self.emotion_result = None
 
         self.camera_var = tk.StringVar()
@@ -182,17 +200,23 @@ class HolisticGuiApp:
         ).pack(side="left", fill="x", expand=True, padx=(10, 0))
 
         self.add_section_label(control_panel, LABEL_MODE)
-        mode_row = tk.Frame(control_panel, bg="#161c22")
-        mode_row.pack(fill="x", padx=18)
+        mode_grid = tk.Frame(control_panel, bg="#161c22")
+        mode_grid.pack(fill="x", padx=18)
+        mode_grid.columnconfigure(0, weight=1)
+        mode_grid.columnconfigure(1, weight=1)
 
         self.mode_buttons = {}
-        for mode_key, label in (
+        for index, (mode_key, label) in enumerate((
             ("rps", LABEL_RPS),
             ("cham", LABEL_CHAM),
             ("air", LABEL_AIR),
-        ):
+            ("wave", LABEL_WAVE),
+            ("gesture", LABEL_HAND_GESTURE),
+            ("head", LABEL_HEAD_GESTURE),
+            ("attention", LABEL_ATTENTION),
+        )):
             button = tk.Button(
-                mode_row,
+                mode_grid,
                 text=label,
                 command=lambda value=mode_key: self.set_mode(value),
                 bg="#24303d",
@@ -201,11 +225,17 @@ class HolisticGuiApp:
                 activebackground="#314051",
                 activeforeground="#ffffff",
                 font=("Malgun Gothic", 10, "bold"),
-                width=10,
+                width=12,
+                wraplength=132,
             )
-            button.pack(side="left", expand=True, fill="x", padx=(0, 8))
+            button.grid(
+                row=index // 2,
+                column=index % 2,
+                sticky="ew",
+                padx=(0, 8 if index % 2 == 0 else 0),
+                pady=(0, 8),
+            )
             self.mode_buttons[mode_key] = button
-        self.mode_buttons["air"].pack_configure(padx=(0, 0))
 
         self.add_section_label(control_panel, LABEL_TOGGLES)
         toggle_frame = tk.Frame(control_panel, bg="#161c22")
@@ -368,6 +398,7 @@ class HolisticGuiApp:
             self.capture_fps = 30.0
         self.frame_index = 0
         self.clear_air_paths()
+        self.reset_motion_states()
         self.source_var.set(
             f"\uc18c\uc2a4: webcam index {selected_candidate['index']} via {selected_candidate['backend_label']}"
         )
@@ -379,18 +410,15 @@ class HolisticGuiApp:
         else:
             self.active_mode = mode_key
 
+        self.clear_air_paths()
+        self.reset_motion_states()
         self.update_mode_buttons()
-        if self.active_mode == "rps":
-            self.mode_var.set("\ud604\uc7ac \ubaa8\ub4dc: " + LABEL_RPS)
-        elif self.active_mode == "cham":
-            self.mode_var.set("\ud604\uc7ac \ubaa8\ub4dc: " + LABEL_CHAM)
-        elif self.active_mode == "air":
-            self.mode_var.set("\ud604\uc7ac \ubaa8\ub4dc: " + LABEL_AIR)
-            self.clear_air_paths()
+        if self.active_mode in MODE_LABELS:
+            self.mode_var.set("\ud604\uc7ac \ubaa8\ub4dc: " + MODE_LABELS[self.active_mode])
+            self.result_var.set("\uc778\uc2dd \uacb0\uacfc \ub300\uae30 \uc911")
         else:
             self.mode_var.set("\ud604\uc7ac \ubaa8\ub4dc: \uc5c6\uc74c")
             self.result_var.set("\ubaa8\ub4dc \uaebc\uc9d0")
-            self.clear_air_paths()
 
     def update_mode_buttons(self):
         for mode_key, button in self.mode_buttons.items():
@@ -401,6 +429,11 @@ class HolisticGuiApp:
 
     def clear_air_paths(self):
         self.air_paths = {"left": [], "right": []}
+
+    def reset_motion_states(self):
+        self.wave_histories = {"left": deque(maxlen=30), "right": deque(maxlen=30)}
+        self.head_history = deque(maxlen=36)
+        self.away_frame_count = 0
 
     def release_camera(self):
         if self.cap is not None:
@@ -480,6 +513,14 @@ class HolisticGuiApp:
             self.apply_cham_overlay(frame_bgr, frame_record)
         elif self.active_mode == "air":
             self.apply_air_overlay(frame_bgr, frame_record)
+        elif self.active_mode == "wave":
+            self.apply_wave_overlay(frame_bgr, frame_record)
+        elif self.active_mode == "gesture":
+            self.apply_gesture_overlay(frame_bgr, frame_record)
+        elif self.active_mode == "head":
+            self.apply_head_overlay(frame_bgr, frame_record)
+        elif self.active_mode == "attention":
+            self.apply_attention_overlay(frame_bgr, frame_record)
         else:
             self.result_var.set("\ubaa8\ub4dc \uaebc\uc9d0")
 
@@ -610,16 +651,321 @@ class HolisticGuiApp:
         self.update_air_paths(frame_record)
         self.draw_air_paths(frame_bgr)
         self.result_var.set("\uc5d0\uc5b4\ub4dc\ub85c\uc789: \uc190\uac00\ub77d \uacbd\ub85c \ud45c\uc2dc \uc911")
+        self.draw_mode_text(frame_bgr, "Air Drawing Active")
+
+    def apply_wave_overlay(self, frame_bgr, frame_record):
+        self.update_wave_histories(frame_record)
+        wave_states = {
+            side: self.detect_wave(side, frame_bgr.shape[1])
+            for side in ("left", "right")
+        }
+        left_state, right_state = self.get_display_side_values(wave_states)
+        result_text = f"{LABEL_WAVE}: L={left_state}, R={right_state}"
+        self.result_var.set(result_text)
+        self.draw_hand_state_labels(frame_bgr, frame_record, wave_states)
+        self.draw_mode_text(frame_bgr, f"Wave  L:{left_state}  R:{right_state}")
+
+    def apply_gesture_overlay(self, frame_bgr, frame_record):
+        gesture_states = {
+            "left": self.detect_static_hand_gesture(frame_record["left_hand_landmarks"]),
+            "right": self.detect_static_hand_gesture(frame_record["right_hand_landmarks"]),
+        }
+        if self.detect_two_hand_heart(frame_record):
+            gesture_states["left"] = "HEART"
+            gesture_states["right"] = "HEART"
+
+        left_state, right_state = self.get_display_side_values(gesture_states)
+        self.result_var.set(f"{LABEL_HAND_GESTURE}: L={left_state}, R={right_state}")
+        self.draw_hand_state_labels(frame_bgr, frame_record, gesture_states)
+        self.draw_mode_text(frame_bgr, f"Gesture  L:{left_state}  R:{right_state}")
+
+    def apply_head_overlay(self, frame_bgr, frame_record):
+        self.update_head_history(frame_record)
+        head_state = self.detect_head_motion()
+        if head_state == "AGREE":
+            result_state = "\ub3d9\uc758"
+            overlay_state = "AGREE"
+        elif head_state == "NEGATIVE":
+            result_state = "\ubd80\uc815"
+            overlay_state = "NEGATIVE"
+        else:
+            result_state = "\uc778\uc2dd \ub300\uae30"
+            overlay_state = "WAITING"
+
+        self.result_var.set(f"{LABEL_HEAD_GESTURE}: {result_state}")
+        self.draw_mode_text(frame_bgr, f"Head Motion: {overlay_state}")
+
+    def apply_attention_overlay(self, frame_bgr, frame_record):
+        attention_state = self.detect_attention_state(frame_record)
+        if attention_state == "SCREEN":
+            result_state = "\ud654\uba74 \uc751\uc2dc"
+            overlay_state = "LOOKING AT SCREEN"
+        elif attention_state == "LOOKING_AWAY":
+            result_state = "\ud654\uba74 \ubc16 \uc751\uc2dc"
+            overlay_state = "LOOKING AWAY"
+        elif attention_state == "AWAY":
+            result_state = "\uc790\ub9ac \ube44\uc6c0"
+            overlay_state = "AWAY"
+        else:
+            result_state = "\uc5bc\uad74 \ucc3e\ub294 \uc911"
+            overlay_state = "SEARCHING FACE"
+
+        self.result_var.set(f"{LABEL_ATTENTION}: {result_state}")
+        self.draw_mode_text(frame_bgr, f"Attention: {overlay_state}")
+
+    def draw_mode_text(self, frame_bgr, text, color=(255, 255, 255)):
         cv2.putText(
             frame_bgr,
-            "Air Drawing Active",
+            text,
             (40, frame_bgr.shape[0] - 28),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.9,
-            (255, 255, 255),
+            color,
             2,
             cv2.LINE_AA,
         )
+
+    def draw_hand_state_labels(self, frame_bgr, frame_record, side_states):
+        for side, state in side_states.items():
+            records = frame_record[f"{side}_hand_landmarks"]
+            anchor = core.hand_anchor_point(records)
+            if anchor is None:
+                continue
+            display_side = self.get_display_side_name(side)
+            cv2.putText(
+                frame_bgr,
+                f"{display_side.title()}: {state}",
+                (anchor[0] + 10, max(30, anchor[1] - 12)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (127, 209, 185),
+                2,
+                cv2.LINE_AA,
+            )
+
+    def get_display_side_values(self, side_values):
+        if self.mirror_var.get():
+            return side_values["right"], side_values["left"]
+        return side_values["left"], side_values["right"]
+
+    def get_display_side_name(self, side):
+        if not self.mirror_var.get():
+            return side
+        return "right" if side == "left" else "left"
+
+    def update_wave_histories(self, frame_record):
+        for side in ("left", "right"):
+            anchor = core.hand_anchor_point(frame_record[f"{side}_hand_landmarks"])
+            self.wave_histories[side].append(anchor)
+
+    def detect_wave(self, side, frame_width):
+        points = [point for point in self.wave_histories[side] if point is not None]
+        if len(points) < 12:
+            return "WAIT"
+
+        xs = [point[0] for point in points]
+        amplitude = max(xs) - min(xs)
+        min_amplitude = max(42, frame_width * 0.055)
+        direction_changes = self.count_direction_changes(xs, min_delta=8)
+        if amplitude >= min_amplitude and direction_changes >= 2:
+            return "HELLO"
+        return "NONE"
+
+    def detect_static_hand_gesture(self, hand_records):
+        pose = self.analyze_hand_pose(hand_records)
+        if pose is None:
+            return "NONE"
+
+        extended = pose["extended"]
+        folded_fingers = not any(
+            extended[finger] for finger in ("index", "middle", "ring", "pinky")
+        )
+        if pose["thumb_up"] and folded_fingers:
+            return "THUMBS_UP"
+        if pose["pinch"] and extended["middle"] and extended["ring"] and extended["pinky"]:
+            return "OK"
+        if pose["pinch"] and not extended["middle"] and not extended["ring"] and not extended["pinky"]:
+            return "HEART"
+        return "NONE"
+
+    def detect_two_hand_heart(self, frame_record):
+        left_map = core.records_by_name(frame_record["left_hand_landmarks"])
+        right_map = core.records_by_name(frame_record["right_hand_landmarks"])
+        if not left_map or not right_map:
+            return False
+
+        left_scale = self.hand_scale(left_map)
+        right_scale = self.hand_scale(right_map)
+        scale = max(40, (left_scale + right_scale) / 2)
+        threshold = scale * 0.75
+
+        left_thumb = core.point_from_record(left_map.get("THUMB_TIP"))
+        right_thumb = core.point_from_record(right_map.get("THUMB_TIP"))
+        left_index = core.point_from_record(left_map.get("INDEX_FINGER_TIP"))
+        right_index = core.point_from_record(right_map.get("INDEX_FINGER_TIP"))
+        left_wrist = core.point_from_record(left_map.get("WRIST"))
+        right_wrist = core.point_from_record(right_map.get("WRIST"))
+
+        thumb_distance = core.distance_between_points(left_thumb, right_thumb)
+        index_distance = core.distance_between_points(left_index, right_index)
+        wrist_distance = core.distance_between_points(left_wrist, right_wrist)
+        if thumb_distance is None or index_distance is None or wrist_distance is None:
+            return False
+        return thumb_distance < threshold and index_distance < threshold and wrist_distance > scale
+
+    def analyze_hand_pose(self, hand_records):
+        if not hand_records:
+            return None
+
+        hand_map = core.records_by_name(hand_records)
+        scale = self.hand_scale(hand_map)
+        thumb_tip = core.point_from_record(hand_map.get("THUMB_TIP"))
+        thumb_ip = core.point_from_record(hand_map.get("THUMB_IP"))
+        thumb_mcp = core.point_from_record(hand_map.get("THUMB_MCP"))
+        wrist = core.point_from_record(hand_map.get("WRIST"))
+        index_tip = core.point_from_record(hand_map.get("INDEX_FINGER_TIP"))
+
+        thumb_angle = core.angle_between_points(thumb_mcp, thumb_ip, thumb_tip)
+        thumb_up = (
+            thumb_tip is not None
+            and thumb_ip is not None
+            and thumb_mcp is not None
+            and wrist is not None
+            and thumb_angle is not None
+            and thumb_angle >= 145
+            and thumb_tip[1] < thumb_ip[1] < thumb_mcp[1]
+            and wrist[1] - thumb_tip[1] > scale * 0.28
+        )
+
+        pinch_distance = core.distance_between_points(thumb_tip, index_tip)
+        pinch = pinch_distance is not None and pinch_distance <= scale * 0.42
+
+        extended = {
+            "thumb": thumb_up,
+            "index": core.finger_is_extended(
+                hand_map,
+                "INDEX_FINGER_MCP",
+                "INDEX_FINGER_PIP",
+                "INDEX_FINGER_TIP",
+            ),
+            "middle": core.finger_is_extended(
+                hand_map,
+                "MIDDLE_FINGER_MCP",
+                "MIDDLE_FINGER_PIP",
+                "MIDDLE_FINGER_TIP",
+            ),
+            "ring": core.finger_is_extended(
+                hand_map,
+                "RING_FINGER_MCP",
+                "RING_FINGER_PIP",
+                "RING_FINGER_TIP",
+            ),
+            "pinky": core.finger_is_extended(
+                hand_map,
+                "PINKY_MCP",
+                "PINKY_PIP",
+                "PINKY_TIP",
+            ),
+        }
+
+        return {
+            "extended": extended,
+            "pinch": pinch,
+            "thumb_up": thumb_up,
+        }
+
+    def hand_scale(self, hand_map):
+        wrist = core.point_from_record(hand_map.get("WRIST"))
+        middle_mcp = core.point_from_record(hand_map.get("MIDDLE_FINGER_MCP"))
+        index_mcp = core.point_from_record(hand_map.get("INDEX_FINGER_MCP"))
+        pinky_mcp = core.point_from_record(hand_map.get("PINKY_MCP"))
+
+        scale = core.distance_between_points(wrist, middle_mcp)
+        if scale is None or scale <= 0:
+            scale = core.distance_between_points(index_mcp, pinky_mcp)
+        if scale is None or scale <= 0:
+            scale = 80
+        return scale
+
+    def update_head_history(self, frame_record):
+        offset = self.get_head_offset(frame_record)
+        self.head_history.append(offset)
+
+    def get_head_offset(self, frame_record):
+        upper_body = frame_record["upper_body_landmarks"]
+        nose = upper_body.get("NOSE")
+        left_eye = upper_body.get("LEFT_EYE")
+        right_eye = upper_body.get("RIGHT_EYE")
+        if nose is None or left_eye is None or right_eye is None:
+            return None
+
+        left_eye_point = core.point_from_record(left_eye)
+        right_eye_point = core.point_from_record(right_eye)
+        nose_point = core.point_from_record(nose)
+        eye_distance = core.distance_between_points(left_eye_point, right_eye_point)
+        if eye_distance is None or eye_distance <= 0:
+            return None
+
+        center_x = (left_eye_point[0] + right_eye_point[0]) / 2
+        center_y = (left_eye_point[1] + right_eye_point[1]) / 2
+        return (
+            (nose_point[0] - center_x) / eye_distance,
+            (nose_point[1] - center_y) / eye_distance,
+        )
+
+    def detect_head_motion(self):
+        offsets = [offset for offset in self.head_history if offset is not None]
+        if len(offsets) < 12:
+            return "WAIT"
+
+        xs = [offset[0] for offset in offsets]
+        ys = [offset[1] for offset in offsets]
+        x_amplitude = max(xs) - min(xs)
+        y_amplitude = max(ys) - min(ys)
+        x_changes = self.count_direction_changes(xs, min_delta=0.035)
+        y_changes = self.count_direction_changes(ys, min_delta=0.035)
+
+        if y_amplitude >= 0.23 and y_changes >= 2 and y_amplitude > x_amplitude * 1.12:
+            return "AGREE"
+        if x_amplitude >= 0.2 and x_changes >= 2 and x_amplitude > y_amplitude * 1.12:
+            return "NEGATIVE"
+        return "WAIT"
+
+    def detect_attention_state(self, frame_record):
+        has_face = bool(frame_record["face_landmarks"])
+        has_nose = frame_record["upper_body_landmarks"].get("NOSE") is not None
+        if not has_face and not has_nose:
+            self.away_frame_count += 1
+        else:
+            self.away_frame_count = 0
+
+        if self.away_frame_count >= 12:
+            return "AWAY"
+        if not has_face:
+            return "SEARCHING"
+
+        direction = self.detect_face_direction(frame_record["upper_body_landmarks"])
+        if direction == "CENTER":
+            return "SCREEN"
+        if direction in ("LEFT", "RIGHT"):
+            return "LOOKING_AWAY"
+        return "SEARCHING"
+
+    def count_direction_changes(self, values, min_delta):
+        signs = []
+        for previous, current in zip(values, values[1:]):
+            delta = current - previous
+            if abs(delta) < min_delta:
+                continue
+            signs.append(1 if delta > 0 else -1)
+
+        changes = 0
+        previous_sign = None
+        for sign in signs:
+            if previous_sign is not None and sign != previous_sign:
+                changes += 1
+            previous_sign = sign
+        return changes
 
     def get_display_hand_states(self, frame_record):
         left_state = frame_record["hand_gestures"]["left"]["state"]
