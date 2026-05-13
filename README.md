@@ -33,11 +33,19 @@ GUI 앱을 실행하면 왼쪽에서 카메라와 인식 모드를 선택하고,
 - 웹캠
 - Git
 
-필요한 Python 패키지:
+필요한 Python 패키지는 `requirements.txt`에 정리되어 있습니다. 처음 실행하는 사람은 아래 명령으로 한 번에 설치하면 됩니다.
 
 ```powershell
-pip install opencv-python mediapipe pillow numpy torch
+pip install -r requirements.txt
 ```
+
+직접 설치해야 하는 주요 패키지는 다음과 같습니다.
+
+- `mediapipe`: 얼굴, 포즈, 손 랜드마크 추출
+- `opencv-python`: 카메라 입력, 영상 처리, 화면 주석 표시
+- `pillow`: Tkinter 화면에 OpenCV 프레임 표시
+- `numpy`: 프레임과 좌표 계산
+- `torch`: 감정 인식 모델 추론
 
 이 저장소에는 이미 실행에 필요한 모델 파일이 포함되어 있습니다.
 
@@ -136,6 +144,7 @@ python holistic_gui_app.py
 | `emotion_recognizer.py` | 감정 인식 모델 구조와 추론 로직입니다. |
 | `project_version.py` | 현재 앱 버전 값을 관리합니다. |
 | `VERSION` | 현재 버전을 텍스트로 기록합니다. |
+| `requirements.txt` | 프로젝트 실행에 필요한 Python 패키지 목록입니다. |
 | `CHANGELOG.md` | 버전별 변경 내용을 기록합니다. |
 | `DEVELOPED_FEATURES.md` | 개발된 기능 상세 정리 문서입니다. |
 | `input.mp4`, `test01.mp4` | 테스트용 영상 파일입니다. |

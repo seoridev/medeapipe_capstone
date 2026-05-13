@@ -2,6 +2,7 @@
 
 ## [0.1.0] - 2026-05-13
 
+- Added `requirements.txt` for reproducible dependency installation.
 - Added a beginner-friendly README with setup, usage, mode descriptions, and file structure.
 - Added wave recognition mode.
 - Added thumbs-up, heart, and OK gesture recognition mode.
