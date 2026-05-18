@@ -200,9 +200,10 @@ https://github.com/seoridev/medeapipe_capstone
 The GUI includes a lightweight Google Web Speech STT panel.
 
 1. Select a microphone in the STT section.
-2. Choose provider, chunk length, and language.
-3. Press `STT start` to begin microphone transcription.
-4. Press `STT stop` to stop recording.
-5. Use `STT save` or `STT clear` for the transcript box.
+2. Choose provider, language, sensitivity, and speech-end silence time.
+3. Press `STT start` to keep listening continuously.
+4. Speak naturally; STT sends each utterance after a short pause.
+5. Press `STT stop` to stop recording.
+6. Use `STT save` or `STT clear` for the transcript box.
 
-Google Web Speech needs an internet connection because audio chunks are sent to Google's recognition service.
+Google Web Speech needs an internet connection because each detected utterance is sent to Google's recognition service.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from collections import deque
 from dataclasses import dataclass
 
 try:
@@ -33,13 +34,22 @@ SAMPLE_RATE = 16_000
 CHANNELS = 1
 
 PROVIDER_OPTIONS = ("google",)
-CHUNK_OPTIONS = ("3 sec", "5 sec", "8 sec")
+SILENCE_OPTIONS = ("0.6 sec", "0.8 sec", "1.0 sec", "1.2 sec")
+SENSITIVITY_OPTIONS = ("high", "medium", "low")
 LANGUAGE_OPTIONS = ("ko-KR", "en-US", "ja-JP", "zh-CN")
-CHUNK_SECONDS_BY_LABEL = {
-    "3 sec": 3,
-    "5 sec": 5,
-    "8 sec": 8,
+SILENCE_SECONDS_BY_LABEL = {
+    "0.6 sec": 0.6,
+    "0.8 sec": 0.8,
+    "1.0 sec": 1.0,
+    "1.2 sec": 1.2,
 }
+START_RMS_BY_SENSITIVITY = {
+    "high": 0.008,
+    "medium": 0.015,
+    "low": 0.025,
+}
+PRE_ROLL_SECONDS = 0.25
+MIN_UTTERANCE_SECONDS = 0.35
 
 
 @dataclass
@@ -59,7 +69,8 @@ class RealtimeSTT:
         self.is_running = False
 
         self.active_provider = "google"
-        self.active_chunk_label = "5 sec"
+        self.active_silence_label = "0.8 sec"
+        self.active_sensitivity = "medium"
         self.active_mic_label = ""
         self.active_language = "ko-KR"
         self.active_timestamps = True
@@ -97,7 +108,8 @@ class RealtimeSTT:
         self,
         mic_label: str,
         provider: str,
-        chunk_label: str,
+        silence_label: str,
+        sensitivity: str,
         language: str,
         timestamps: bool,
     ) -> None:
@@ -114,7 +126,8 @@ class RealtimeSTT:
 
         self.active_mic_label = mic_label
         self.active_provider = provider
-        self.active_chunk_label = chunk_label
+        self.active_silence_label = silence_label
+        self.active_sensitivity = sensitivity
         self.active_language = language
         self.active_timestamps = timestamps
 
@@ -145,28 +158,74 @@ class RealtimeSTT:
             self.ui_queue.put(("text", "\n[STT started]\n"))
             self._start_stream()
 
-            pending = []
-            chunk_seconds = CHUNK_SECONDS_BY_LABEL.get(self.active_chunk_label, 5)
-            min_samples = SAMPLE_RATE * chunk_seconds
+            pre_roll = deque()
+            pre_roll_samples = 0
+            pre_roll_limit = int(SAMPLE_RATE * PRE_ROLL_SECONDS)
+            silence_limit = int(
+                SAMPLE_RATE * SILENCE_SECONDS_BY_LABEL.get(
+                    self.active_silence_label,
+                    0.8,
+                )
+            )
+            start_threshold = START_RMS_BY_SENSITIVITY.get(self.active_sensitivity, 0.015)
+            end_threshold = start_threshold * 0.55
+            min_utterance_samples = int(SAMPLE_RATE * MIN_UTTERANCE_SECONDS)
+
+            in_speech = False
+            speech_chunks = []
+            speech_samples = 0
+            silence_samples = 0
             audio_offset = 0.0
+            utterance_start = 0.0
 
             while not self.stop_event.is_set():
                 try:
                     chunk = self.audio_queue.get(timeout=0.2)
-                    pending.append(chunk)
                 except queue.Empty:
                     continue
 
-                sample_count = sum(len(item) for item in pending)
-                if sample_count >= min_samples:
-                    audio = np.concatenate(pending)
-                    pending.clear()
-                    self._transcribe_audio(audio, audio_offset)
-                    audio_offset += len(audio) / SAMPLE_RATE
+                chunk_start = audio_offset
+                audio_offset += len(chunk) / SAMPLE_RATE
+                chunk_rms = self._rms(chunk)
 
-            if pending:
-                audio = np.concatenate(pending)
-                self._transcribe_audio(audio, audio_offset)
+                if not in_speech:
+                    if chunk_rms >= start_threshold:
+                        in_speech = True
+                        utterance_start = max(0.0, chunk_start - (pre_roll_samples / SAMPLE_RATE))
+                        speech_chunks = list(pre_roll) + [chunk]
+                        speech_samples = pre_roll_samples + len(chunk)
+                        silence_samples = 0
+                        pre_roll.clear()
+                        pre_roll_samples = 0
+                        self.ui_queue.put(("status", "STT speech detected"))
+                    else:
+                        pre_roll.append(chunk)
+                        pre_roll_samples += len(chunk)
+                        while pre_roll_samples > pre_roll_limit and pre_roll:
+                            removed = pre_roll.popleft()
+                            pre_roll_samples -= len(removed)
+                    continue
+
+                speech_chunks.append(chunk)
+                speech_samples += len(chunk)
+                if chunk_rms <= end_threshold:
+                    silence_samples += len(chunk)
+                else:
+                    silence_samples = 0
+
+                if silence_samples >= silence_limit:
+                    audio = np.concatenate(speech_chunks)
+                    if speech_samples >= min_utterance_samples:
+                        self._transcribe_audio(audio, utterance_start)
+                    in_speech = False
+                    speech_chunks = []
+                    speech_samples = 0
+                    silence_samples = 0
+                    self.ui_queue.put(("status", "STT listening"))
+
+            if speech_chunks and speech_samples >= min_utterance_samples:
+                audio = np.concatenate(speech_chunks)
+                self._transcribe_audio(audio, utterance_start)
 
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
@@ -247,3 +306,8 @@ class RealtimeSTT:
         clipped = np.clip(audio, -1.0, 1.0)
         pcm = (clipped * 32767).astype(np.int16)
         return sr.AudioData(pcm.tobytes(), SAMPLE_RATE, 2)
+
+    def _rms(self, audio) -> float:
+        if audio.size == 0:
+            return 0.0
+        return float(np.sqrt(np.mean(np.square(audio))))

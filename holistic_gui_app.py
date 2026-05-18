@@ -12,7 +12,13 @@ from PIL import Image, ImageTk
 import detailed_holistic_tracker as core
 from emotion_recognizer import EmotionRecognizer
 from project_version import __version__
-from stt_engine import CHUNK_OPTIONS, LANGUAGE_OPTIONS, PROVIDER_OPTIONS, RealtimeSTT
+from stt_engine import (
+    LANGUAGE_OPTIONS,
+    PROVIDER_OPTIONS,
+    SENSITIVITY_OPTIONS,
+    SILENCE_OPTIONS,
+    RealtimeSTT,
+)
 
 
 DISPLAY_WIDTH = 960
@@ -104,7 +110,8 @@ class HolisticGuiApp:
         self.stt_status_var = tk.StringVar(value="STT \ub300\uae30 \uc911")
         self.stt_mic_var = tk.StringVar()
         self.stt_provider_var = tk.StringVar(value="google")
-        self.stt_chunk_var = tk.StringVar(value="5 sec")
+        self.stt_silence_var = tk.StringVar(value="0.8 sec")
+        self.stt_sensitivity_var = tk.StringVar(value="medium")
         self.stt_language_var = tk.StringVar(value="ko-KR")
         self.stt_timestamps_var = tk.BooleanVar(value=True)
 
@@ -331,8 +338,12 @@ class HolisticGuiApp:
         stt_option_row = tk.Frame(control_panel, bg="#161c22")
         stt_option_row.pack(fill="x", padx=18, pady=(0, 8))
         self.make_small_option(stt_option_row, self.stt_provider_var, PROVIDER_OPTIONS).pack(side="left", fill="x", expand=True)
-        self.make_small_option(stt_option_row, self.stt_chunk_var, CHUNK_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
         self.make_small_option(stt_option_row, self.stt_language_var, LANGUAGE_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        stt_turn_row = tk.Frame(control_panel, bg="#161c22")
+        stt_turn_row.pack(fill="x", padx=18, pady=(0, 8))
+        self.make_small_option(stt_turn_row, self.stt_sensitivity_var, SENSITIVITY_OPTIONS).pack(side="left", fill="x", expand=True)
+        self.make_small_option(stt_turn_row, self.stt_silence_var, SILENCE_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
 
         stt_action_row = tk.Frame(control_panel, bg="#161c22")
         stt_action_row.pack(fill="x", padx=18, pady=(0, 8))
@@ -575,7 +586,8 @@ class HolisticGuiApp:
             self.stt.start(
                 self.stt_mic_var.get(),
                 self.stt_provider_var.get(),
-                self.stt_chunk_var.get(),
+                self.stt_silence_var.get(),
+                self.stt_sensitivity_var.get(),
                 self.stt_language_var.get(),
                 self.stt_timestamps_var.get(),
             )
