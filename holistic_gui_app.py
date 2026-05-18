@@ -23,8 +23,10 @@ from stt_engine import (
 
 DISPLAY_WIDTH = 960
 DISPLAY_HEIGHT = 540
-EMOTION_INFERENCE_INTERVAL_MS = 500
+EMOTION_INFERENCE_INTERVAL_MS = 250
 EMOTION_SMOOTHING_WINDOW = 3
+EMOTION_NEUTRAL_CONFIDENCE_THRESHOLD = 0.50
+EMOTION_NEUTRAL_MARGIN_THRESHOLD = 0.15
 AIR_DRAWING_COLORS = {
     "left": (0, 0, 255),
     "right": (255, 0, 0),
@@ -846,10 +848,10 @@ class HolisticGuiApp:
 
         self.emotion_score_history.append(prediction["scores"])
         averaged_scores = self.average_emotion_scores()
-        label = max(averaged_scores, key=averaged_scores.get)
+        label = self.get_emotion_display_label(averaged_scores)
         self.emotion_result = {
             "label": label,
-            "confidence": averaged_scores[label],
+            "confidence": averaged_scores.get(label, 0.0),
             "scores": averaged_scores,
         }
 
@@ -863,6 +865,19 @@ class HolisticGuiApp:
             / len(self.emotion_score_history)
             for label in labels
         }
+
+    def get_emotion_display_label(self, scores):
+        ranked_scores = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        if not ranked_scores:
+            return "Neutral"
+
+        top_label, top_score = ranked_scores[0]
+        second_score = ranked_scores[1][1] if len(ranked_scores) > 1 else 0.0
+        if top_score < EMOTION_NEUTRAL_CONFIDENCE_THRESHOLD:
+            return "Neutral"
+        if top_score - second_score < EMOTION_NEUTRAL_MARGIN_THRESHOLD:
+            return "Neutral"
+        return top_label
 
     def extract_face_crop(self, frame_bgr, frame_record):
         face_landmarks = frame_record["face_landmarks"]
