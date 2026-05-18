@@ -23,6 +23,8 @@ from stt_engine import (
 
 DISPLAY_WIDTH = 960
 DISPLAY_HEIGHT = 540
+EMOTION_INFERENCE_INTERVAL_MS = 500
+EMOTION_SMOOTHING_WINDOW = 3
 AIR_DRAWING_COLORS = {
     "left": (0, 0, 255),
     "right": (255, 0, 0),
@@ -93,6 +95,8 @@ class HolisticGuiApp:
         self.head_history = deque(maxlen=36)
         self.away_frame_count = 0
         self.emotion_result = None
+        self.emotion_score_history = deque(maxlen=EMOTION_SMOOTHING_WINDOW)
+        self.last_emotion_inference_ms = -EMOTION_INFERENCE_INTERVAL_MS
 
         self.camera_var = tk.StringVar()
         self.source_var = tk.StringVar(
@@ -769,7 +773,7 @@ class HolisticGuiApp:
             tracking_enabled,
             rps_enabled,
         )
-        self.emotion_result = self.predict_emotion(frame_bgr, frame_record)
+        self.update_emotion_result(frame_bgr, frame_record, timestamp_ms)
 
         if self.marker_only_var.get():
             base_frame = np.zeros_like(frame_bgr)
@@ -812,18 +816,53 @@ class HolisticGuiApp:
         else:
             self.result_var.set("\ubaa8\ub4dc \uaebc\uc9d0")
 
-    def predict_emotion(self, frame_bgr, frame_record):
-        if not self.emotion_var.get() or self.emotion_recognizer is None:
-            return None
+    def update_emotion_result(self, frame_bgr, frame_record, timestamp_ms):
+        if not self.emotion_var.get():
+            self.emotion_result = None
+            self.emotion_score_history.clear()
+            return
+
+        if self.emotion_recognizer is None:
+            self.emotion_result = None
+            return
+
+        if timestamp_ms - self.last_emotion_inference_ms < EMOTION_INFERENCE_INTERVAL_MS:
+            return
+
+        self.last_emotion_inference_ms = timestamp_ms
 
         face_crop = self.extract_face_crop(frame_bgr, frame_record)
         if face_crop is None:
-            return None
+            self.emotion_result = None
+            self.emotion_score_history.clear()
+            return
 
         try:
-            return self.emotion_recognizer.predict(face_crop)
+            prediction = self.emotion_recognizer.predict(face_crop)
         except Exception:
-            return None
+            self.emotion_result = None
+            self.emotion_score_history.clear()
+            return
+
+        self.emotion_score_history.append(prediction["scores"])
+        averaged_scores = self.average_emotion_scores()
+        label = max(averaged_scores, key=averaged_scores.get)
+        self.emotion_result = {
+            "label": label,
+            "confidence": averaged_scores[label],
+            "scores": averaged_scores,
+        }
+
+    def average_emotion_scores(self):
+        if not self.emotion_score_history:
+            return {}
+
+        labels = self.emotion_score_history[0].keys()
+        return {
+            label: sum(scores[label] for scores in self.emotion_score_history)
+            / len(self.emotion_score_history)
+            for label in labels
+        }
 
     def extract_face_crop(self, frame_bgr, frame_record):
         face_landmarks = frame_record["face_landmarks"]
@@ -862,18 +901,24 @@ class HolisticGuiApp:
 
         if self.emotion_recognizer is None:
             text = "Emotion: MODEL ERROR"
-            confidence_text = ""
+            score_lines = []
         elif self.emotion_result is None:
             text = "Emotion: NONE"
-            confidence_text = ""
+            score_lines = []
         else:
             label = self.emotion_result["label"]
-            confidence = self.emotion_result["confidence"] * 100.0
             text = f"Emotion: {label}"
-            confidence_text = f"{confidence:.1f}%"
+            score_lines = [
+                f"{score_label}: {score * 100.0:.1f}%"
+                for score_label, score in sorted(
+                    self.emotion_result["scores"].items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
+            ]
 
-        box_width = 280
-        box_height = 86 if confidence_text else 58
+        box_width = 340
+        box_height = 58 + (len(score_lines) * 28)
         x1 = frame_bgr.shape[1] - box_width - 20
         y1 = 20
         x2 = frame_bgr.shape[1] - 20
@@ -893,13 +938,14 @@ class HolisticGuiApp:
             2,
             cv2.LINE_AA,
         )
-        if confidence_text:
+
+        for index, line in enumerate(score_lines):
             cv2.putText(
                 frame_bgr,
-                confidence_text,
-                (x1 + 14, y1 + 58),
+                line,
+                (x1 + 14, y1 + 58 + (index * 28)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.72,
+                0.58,
                 (210, 226, 235),
                 2,
                 cv2.LINE_AA,
