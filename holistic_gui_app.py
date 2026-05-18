@@ -24,7 +24,6 @@ from stt_engine import (
 DISPLAY_WIDTH = 960
 DISPLAY_HEIGHT = 540
 EMOTION_INFERENCE_INTERVAL_MS = 150
-EMOTION_SMOOTHING_WINDOW = 3
 EMOTION_NEUTRAL_CONFIDENCE_THRESHOLD = 0.50
 EMOTION_NEUTRAL_MARGIN_THRESHOLD = 0.15
 AIR_DRAWING_COLORS = {
@@ -97,7 +96,6 @@ class HolisticGuiApp:
         self.head_history = deque(maxlen=36)
         self.away_frame_count = 0
         self.emotion_result = None
-        self.emotion_score_history = deque(maxlen=EMOTION_SMOOTHING_WINDOW)
         self.last_emotion_inference_ms = -EMOTION_INFERENCE_INTERVAL_MS
 
         self.camera_var = tk.StringVar()
@@ -821,7 +819,6 @@ class HolisticGuiApp:
     def update_emotion_result(self, frame_bgr, frame_record, timestamp_ms):
         if not self.emotion_var.get():
             self.emotion_result = None
-            self.emotion_score_history.clear()
             return
 
         if self.emotion_recognizer is None:
@@ -836,34 +833,20 @@ class HolisticGuiApp:
         face_crop = self.extract_face_crop(frame_bgr, frame_record)
         if face_crop is None:
             self.emotion_result = None
-            self.emotion_score_history.clear()
             return
 
         try:
             prediction = self.emotion_recognizer.predict(face_crop)
         except Exception:
             self.emotion_result = None
-            self.emotion_score_history.clear()
             return
 
-        self.emotion_score_history.append(prediction["scores"])
-        averaged_scores = self.average_emotion_scores()
-        label = self.get_emotion_display_label(averaged_scores)
+        scores = prediction["scores"]
+        label = self.get_emotion_display_label(scores)
         self.emotion_result = {
             "label": label,
-            "confidence": averaged_scores.get(label, 0.0),
-            "scores": averaged_scores,
-        }
-
-    def average_emotion_scores(self):
-        if not self.emotion_score_history:
-            return {}
-
-        labels = self.emotion_score_history[0].keys()
-        return {
-            label: sum(scores[label] for scores in self.emotion_score_history)
-            / len(self.emotion_score_history)
-            for label in labels
+            "confidence": scores.get(label, 0.0),
+            "scores": scores,
         }
 
     def get_emotion_display_label(self, scores):
