@@ -12,7 +12,7 @@ from PIL import Image, ImageTk
 import detailed_holistic_tracker as core
 from emotion_recognizer import EmotionRecognizer
 from project_version import __version__
-from stt_engine import DEVICE_OPTIONS, LANGUAGE_OPTIONS, MODEL_OPTIONS, RealtimeSTT
+from stt_engine import CHUNK_OPTIONS, LANGUAGE_OPTIONS, PROVIDER_OPTIONS, RealtimeSTT
 
 
 DISPLAY_WIDTH = 960
@@ -103,9 +103,9 @@ class HolisticGuiApp:
         )
         self.stt_status_var = tk.StringVar(value="STT \ub300\uae30 \uc911")
         self.stt_mic_var = tk.StringVar()
-        self.stt_device_var = tk.StringVar(value="auto")
-        self.stt_model_var = tk.StringVar(value="tiny")
-        self.stt_language_var = tk.StringVar(value="ko")
+        self.stt_provider_var = tk.StringVar(value="google")
+        self.stt_chunk_var = tk.StringVar(value="5 sec")
+        self.stt_language_var = tk.StringVar(value="ko-KR")
         self.stt_timestamps_var = tk.BooleanVar(value=True)
 
         self.tracking_var = tk.BooleanVar(value=True)
@@ -330,8 +330,8 @@ class HolisticGuiApp:
 
         stt_option_row = tk.Frame(control_panel, bg="#161c22")
         stt_option_row.pack(fill="x", padx=18, pady=(0, 8))
-        self.make_small_option(stt_option_row, self.stt_device_var, DEVICE_OPTIONS).pack(side="left", fill="x", expand=True)
-        self.make_small_option(stt_option_row, self.stt_model_var, MODEL_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.make_small_option(stt_option_row, self.stt_provider_var, PROVIDER_OPTIONS).pack(side="left", fill="x", expand=True)
+        self.make_small_option(stt_option_row, self.stt_chunk_var, CHUNK_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
         self.make_small_option(stt_option_row, self.stt_language_var, LANGUAGE_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
 
         stt_action_row = tk.Frame(control_panel, bg="#161c22")
@@ -574,8 +574,8 @@ class HolisticGuiApp:
         try:
             self.stt.start(
                 self.stt_mic_var.get(),
-                self.stt_device_var.get(),
-                self.stt_model_var.get(),
+                self.stt_provider_var.get(),
+                self.stt_chunk_var.get(),
                 self.stt_language_var.get(),
                 self.stt_timestamps_var.get(),
             )
@@ -586,7 +586,7 @@ class HolisticGuiApp:
 
         self.stt_start_button.configure(state="disabled")
         self.stt_stop_button.configure(state="normal")
-        self.stt_status_var.set("STT: \ubaa8\ub378 \uc900\ube44 \uc911")
+        self.stt_status_var.set("STT: Google Web Speech \uc900\ube44 \uc911")
 
     def stop_stt(self):
         self.stt.stop()

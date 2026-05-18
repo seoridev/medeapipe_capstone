@@ -21,21 +21,25 @@ else:
     SOUNDDEVICE_IMPORT_ERROR = None
 
 try:
-    from faster_whisper import WhisperModel
+    import speech_recognition as sr
 except ImportError as exc:
-    WhisperModel = None
-    WHISPER_IMPORT_ERROR = exc
+    sr = None
+    SPEECH_RECOGNITION_IMPORT_ERROR = exc
 else:
-    WHISPER_IMPORT_ERROR = None
+    SPEECH_RECOGNITION_IMPORT_ERROR = None
 
 
 SAMPLE_RATE = 16_000
 CHANNELS = 1
-CHUNK_SECONDS = 5
 
-DEVICE_OPTIONS = ("auto", "cpu", "cuda")
-MODEL_OPTIONS = ("tiny", "base", "small", "medium", "large-v3", "turbo")
-LANGUAGE_OPTIONS = ("auto", "ko", "en", "ja", "zh")
+PROVIDER_OPTIONS = ("google",)
+CHUNK_OPTIONS = ("3 sec", "5 sec", "8 sec")
+LANGUAGE_OPTIONS = ("ko-KR", "en-US", "ja-JP", "zh-CN")
+CHUNK_SECONDS_BY_LABEL = {
+    "3 sec": 3,
+    "5 sec": 5,
+    "8 sec": 8,
+}
 
 
 @dataclass
@@ -52,15 +56,14 @@ class RealtimeSTT:
         self.stop_event = threading.Event()
         self.worker_thread: threading.Thread | None = None
         self.stream = None
-        self.model = None
-        self.model_key: tuple[str, str] | None = None
         self.is_running = False
 
-        self.active_device = "auto"
-        self.active_model = "tiny"
+        self.active_provider = "google"
+        self.active_chunk_label = "5 sec"
         self.active_mic_label = ""
-        self.active_language = "ko"
+        self.active_language = "ko-KR"
         self.active_timestamps = True
+        self.recognizer = sr.Recognizer() if sr is not None else None
 
     def dependency_error(self) -> str | None:
         missing = []
@@ -68,8 +71,8 @@ class RealtimeSTT:
             missing.append("numpy")
         if SOUNDDEVICE_IMPORT_ERROR is not None:
             missing.append("sounddevice")
-        if WHISPER_IMPORT_ERROR is not None:
-            missing.append("faster-whisper")
+        if SPEECH_RECOGNITION_IMPORT_ERROR is not None:
+            missing.append("SpeechRecognition")
         if not missing:
             return None
         return "STT dependency missing: " + ", ".join(missing)
@@ -93,8 +96,8 @@ class RealtimeSTT:
     def start(
         self,
         mic_label: str,
-        device: str,
-        model_name: str,
+        provider: str,
+        chunk_label: str,
         language: str,
         timestamps: bool,
     ) -> None:
@@ -106,10 +109,12 @@ class RealtimeSTT:
             raise RuntimeError(dependency_error)
         if not mic_label:
             raise RuntimeError("No microphone selected.")
+        if provider != "google":
+            raise RuntimeError(f"Unsupported STT provider: {provider}")
 
         self.active_mic_label = mic_label
-        self.active_device = device
-        self.active_model = model_name
+        self.active_provider = provider
+        self.active_chunk_label = chunk_label
         self.active_language = language
         self.active_timestamps = timestamps
 
@@ -136,13 +141,13 @@ class RealtimeSTT:
 
     def _run_stt(self) -> None:
         try:
-            model = self._load_model()
-            self.ui_queue.put(("status", "STT recording"))
+            self.ui_queue.put(("status", "STT recording with Google Web Speech"))
             self.ui_queue.put(("text", "\n[STT started]\n"))
             self._start_stream()
 
             pending = []
-            min_samples = SAMPLE_RATE * CHUNK_SECONDS
+            chunk_seconds = CHUNK_SECONDS_BY_LABEL.get(self.active_chunk_label, 5)
+            min_samples = SAMPLE_RATE * chunk_seconds
             audio_offset = 0.0
 
             while not self.stop_event.is_set():
@@ -156,12 +161,12 @@ class RealtimeSTT:
                 if sample_count >= min_samples:
                     audio = np.concatenate(pending)
                     pending.clear()
-                    self._transcribe_audio(model, audio, audio_offset)
+                    self._transcribe_audio(audio, audio_offset)
                     audio_offset += len(audio) / SAMPLE_RATE
 
             if pending:
                 audio = np.concatenate(pending)
-                self._transcribe_audio(model, audio, audio_offset)
+                self._transcribe_audio(audio, audio_offset)
 
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
@@ -171,18 +176,6 @@ class RealtimeSTT:
             self.ui_queue.put(("status", "STT stopped"))
             self.ui_queue.put(("running", "false"))
             self.ui_queue.put(("text", "[STT stopped]\n"))
-
-    def _load_model(self):
-        model_name = self.active_model
-        device = self.active_device
-        key = (model_name, device)
-        if self.model is not None and self.model_key == key:
-            return self.model
-
-        self.ui_queue.put(("status", f"Loading STT model: {model_name} ({device})"))
-        self.model = WhisperModel(model_name, device=device, compute_type="auto")
-        self.model_key = key
-        return self.model
 
     def _start_stream(self) -> None:
         selected = self.active_mic_label
@@ -215,7 +208,7 @@ class RealtimeSTT:
         finally:
             self.stream = None
 
-    def _transcribe_audio(self, model, audio, offset: float) -> None:
+    def _transcribe_audio(self, audio, offset: float) -> None:
         if audio.size == 0:
             return
 
@@ -224,31 +217,33 @@ class RealtimeSTT:
             self.ui_queue.put(("status", "STT silence detected"))
             return
 
-        self.ui_queue.put(("status", "STT transcribing"))
-        language = self.active_language
-        kwargs = {
-            "beam_size": 5,
-            "vad_filter": True,
-            "condition_on_previous_text": False,
-        }
-        if language != "auto":
-            kwargs["language"] = language
+        self.ui_queue.put(("status", "STT sending audio to Google Web Speech"))
+        audio_data = self._to_audio_data(audio)
+        try:
+            text = self.recognizer.recognize_google(
+                audio_data,
+                language=self.active_language,
+            ).strip()
+        except sr.UnknownValueError:
+            self.ui_queue.put(("status", "STT could not understand speech"))
+            return
+        except sr.RequestError as exc:
+            self.ui_queue.put(("error", f"Google Web Speech request failed: {exc}"))
+            return
 
-        segments, info = model.transcribe(audio, **kwargs)
-        lines: list[str] = []
-        for segment in segments:
-            text = segment.text.strip()
-            if not text:
-                continue
-            if self.active_timestamps:
-                start = segment.start + offset
-                end = segment.end + offset
-                lines.append(f"[{start:05.2f} - {end:05.2f}] {text}")
-            else:
-                lines.append(text)
-
-        if lines:
-            self.ui_queue.put(("text", "\n".join(lines) + "\n"))
-            self.ui_queue.put(("status", f"STT transcribed ({info.language})"))
-        else:
+        if not text:
             self.ui_queue.put(("status", "STT no speech"))
+            return
+
+        if self.active_timestamps:
+            duration = len(audio) / SAMPLE_RATE
+            line = f"[{offset:05.2f} - {offset + duration:05.2f}] {text}"
+        else:
+            line = text
+        self.ui_queue.put(("text", line + "\n"))
+        self.ui_queue.put(("status", "STT transcribed with Google Web Speech"))
+
+    def _to_audio_data(self, audio):
+        clipped = np.clip(audio, -1.0, 1.0)
+        pcm = (clipped * 32767).astype(np.int16)
+        return sr.AudioData(pcm.tobytes(), SAMPLE_RATE, 2)

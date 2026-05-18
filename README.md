@@ -197,12 +197,12 @@ https://github.com/seoridev/medeapipe_capstone
 - 감정 인식 모델 파일이 없으면 감정 인식 기능은 정상 동작하지 않습니다.
 ## STT controls
 
-The GUI includes a Faster Whisper STT panel.
+The GUI includes a lightweight Google Web Speech STT panel.
 
 1. Select a microphone in the STT section.
-2. Choose device, model, and language.
+2. Choose provider, chunk length, and language.
 3. Press `STT start` to begin microphone transcription.
 4. Press `STT stop` to stop recording.
 5. Use `STT save` or `STT clear` for the transcript box.
 
-The first STT run can take time because Faster Whisper may download the selected model.
+Google Web Speech needs an internet connection because audio chunks are sent to Google's recognition service.
