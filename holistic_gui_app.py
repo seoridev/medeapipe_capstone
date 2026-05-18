@@ -1,5 +1,8 @@
 from collections import deque
+from datetime import datetime
+from pathlib import Path
 import tkinter as tk
+from tkinter import filedialog, messagebox
 from types import SimpleNamespace
 
 import cv2
@@ -9,6 +12,7 @@ from PIL import Image, ImageTk
 import detailed_holistic_tracker as core
 from emotion_recognizer import EmotionRecognizer
 from project_version import __version__
+from stt_engine import DEVICE_OPTIONS, LANGUAGE_OPTIONS, MODEL_OPTIONS, RealtimeSTT
 
 
 DISPLAY_WIDTH = 960
@@ -37,6 +41,14 @@ LABEL_MIRROR = "\uc88c\uc6b0 \ubc18\uc804"
 LABEL_INFO_OVERLAY = "\uc88c\uce21 \uc0c1\ub2e8 \uc815\ubcf4"
 LABEL_EMOTION = "\uac10\uc815 \uc778\uc2dd"
 LABEL_STATUS = "\uc0c1\ud0dc"
+LABEL_STT = "STT"
+LABEL_MIC = "\ub9c8\uc774\ud06c"
+LABEL_STT_REFRESH = "\ub9c8\uc774\ud06c \uc0c8\ub85c\uace0\uce68"
+LABEL_STT_START = "STT \uc2dc\uc791"
+LABEL_STT_STOP = "STT \uc911\uc9c0"
+LABEL_STT_SAVE = "STT \uc800\uc7a5"
+LABEL_STT_CLEAR = "STT \uc9c0\uc6b0\uae30"
+LABEL_STT_RESULT = "STT Result"
 
 MODE_LABELS = {
     "rps": LABEL_RPS,
@@ -89,12 +101,19 @@ class HolisticGuiApp:
         self.status_var = tk.StringVar(
             value="\ub300\uae30 \uc911"
         )
+        self.stt_status_var = tk.StringVar(value="STT \ub300\uae30 \uc911")
+        self.stt_mic_var = tk.StringVar()
+        self.stt_device_var = tk.StringVar(value="auto")
+        self.stt_model_var = tk.StringVar(value="tiny")
+        self.stt_language_var = tk.StringVar(value="ko")
+        self.stt_timestamps_var = tk.BooleanVar(value=True)
 
         self.tracking_var = tk.BooleanVar(value=True)
         self.marker_only_var = tk.BooleanVar(value=False)
         self.mirror_var = tk.BooleanVar(value=False)
         self.info_overlay_var = tk.BooleanVar(value=True)
         self.emotion_var = tk.BooleanVar(value=False)
+        self.stt = RealtimeSTT()
 
         self.holistic = core.mp_holistic.Holistic(
             static_image_mode=False,
@@ -110,19 +129,50 @@ class HolisticGuiApp:
 
         self.build_ui()
         self.refresh_cameras()
+        self.refresh_stt_microphones(show_error=False)
         self.show_placeholder(
             "\uce74\uba54\ub77c\ub97c \uc2dc\uc791\ud558\uba74 \uc778\uc2dd \ud654\uba74\uc774 \uc5ec\uae30\uc5d0 \ud45c\uc2dc\ub429\ub2c8\ub2e4."
         )
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(0, self.update_frame)
+        self.root.after(100, self.poll_stt_events)
 
     def build_ui(self):
         container = tk.Frame(self.root, bg="#101418")
         container.pack(fill="both", expand=True, padx=16, pady=16)
 
-        control_panel = tk.Frame(container, bg="#161c22", width=340)
-        control_panel.pack(side="left", fill="y")
-        control_panel.pack_propagate(False)
+        control_shell = tk.Frame(container, bg="#161c22", width=360)
+        control_shell.pack(side="left", fill="y")
+        control_shell.pack_propagate(False)
+
+        control_canvas = tk.Canvas(
+            control_shell,
+            bg="#161c22",
+            highlightthickness=0,
+            bd=0,
+        )
+        control_scrollbar = tk.Scrollbar(
+            control_shell,
+            orient="vertical",
+            command=control_canvas.yview,
+        )
+        control_panel = tk.Frame(control_canvas, bg="#161c22")
+        control_window = control_canvas.create_window(
+            (0, 0),
+            window=control_panel,
+            anchor="nw",
+        )
+        control_panel.bind(
+            "<Configure>",
+            lambda event: control_canvas.configure(scrollregion=control_canvas.bbox("all")),
+        )
+        control_canvas.bind(
+            "<Configure>",
+            lambda event: control_canvas.itemconfig(control_window, width=event.width),
+        )
+        control_canvas.configure(yscrollcommand=control_scrollbar.set)
+        control_canvas.pack(side="left", fill="both", expand=True)
+        control_scrollbar.pack(side="right", fill="y")
 
         video_panel = tk.Frame(container, bg="#0b0f13")
         video_panel.pack(side="right", fill="both", expand=True, padx=(16, 0))
@@ -247,6 +297,84 @@ class HolisticGuiApp:
         self.make_toggle(toggle_frame, LABEL_INFO_OVERLAY, self.info_overlay_var).pack(fill="x", pady=(0, 8))
         self.make_toggle(toggle_frame, LABEL_EMOTION, self.emotion_var).pack(fill="x")
 
+        self.add_section_label(control_panel, LABEL_STT)
+        self.stt_mic_menu = tk.OptionMenu(control_panel, self.stt_mic_var, "")
+        self.style_option_menu(self.stt_mic_menu)
+        self.stt_mic_menu.pack(fill="x", padx=18, pady=(0, 8))
+
+        stt_row = tk.Frame(control_panel, bg="#161c22")
+        stt_row.pack(fill="x", padx=18, pady=(0, 8))
+        tk.Button(
+            stt_row,
+            text=LABEL_STT_REFRESH,
+            command=self.refresh_stt_microphones,
+            bg="#24303d",
+            fg="#f4f7fb",
+            relief="flat",
+            activebackground="#314051",
+            activeforeground="#ffffff",
+            font=("Malgun Gothic", 9, "bold"),
+        ).pack(side="left", fill="x", expand=True)
+        self.stt_start_button = tk.Button(
+            stt_row,
+            text=LABEL_STT_START,
+            command=self.start_stt,
+            bg="#2d6a4f",
+            fg="#ffffff",
+            relief="flat",
+            activebackground="#3b8b66",
+            activeforeground="#ffffff",
+            font=("Malgun Gothic", 9, "bold"),
+        )
+        self.stt_start_button.pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        stt_option_row = tk.Frame(control_panel, bg="#161c22")
+        stt_option_row.pack(fill="x", padx=18, pady=(0, 8))
+        self.make_small_option(stt_option_row, self.stt_device_var, DEVICE_OPTIONS).pack(side="left", fill="x", expand=True)
+        self.make_small_option(stt_option_row, self.stt_model_var, MODEL_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.make_small_option(stt_option_row, self.stt_language_var, LANGUAGE_OPTIONS).pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        stt_action_row = tk.Frame(control_panel, bg="#161c22")
+        stt_action_row.pack(fill="x", padx=18, pady=(0, 8))
+        self.stt_stop_button = tk.Button(
+            stt_action_row,
+            text=LABEL_STT_STOP,
+            command=self.stop_stt,
+            bg="#69353d",
+            fg="#ffffff",
+            relief="flat",
+            activebackground="#7d414b",
+            activeforeground="#ffffff",
+            font=("Malgun Gothic", 9, "bold"),
+            state="disabled",
+        )
+        self.stt_stop_button.pack(side="left", fill="x", expand=True)
+        tk.Button(
+            stt_action_row,
+            text=LABEL_STT_SAVE,
+            command=self.save_stt_text,
+            bg="#24303d",
+            fg="#f4f7fb",
+            relief="flat",
+            activebackground="#314051",
+            activeforeground="#ffffff",
+            font=("Malgun Gothic", 9, "bold"),
+        ).pack(side="left", fill="x", expand=True, padx=(8, 0))
+        tk.Button(
+            stt_action_row,
+            text=LABEL_STT_CLEAR,
+            command=self.clear_stt_text,
+            bg="#24303d",
+            fg="#f4f7fb",
+            relief="flat",
+            activebackground="#314051",
+            activeforeground="#ffffff",
+            font=("Malgun Gothic", 9, "bold"),
+        ).pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        self.make_toggle(control_panel, "\ud0c0\uc784\uc2a4\ud0ec\ud504 \ud45c\uc2dc", self.stt_timestamps_var).pack(fill="x", padx=18, pady=(0, 8))
+        self.make_info_label(control_panel, self.stt_status_var).pack(fill="x", padx=18, pady=(0, 10))
+
         self.add_section_label(control_panel, LABEL_STATUS)
         self.make_info_label(control_panel, self.source_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.mode_var).pack(fill="x", padx=18, pady=(0, 10))
@@ -269,6 +397,40 @@ class HolisticGuiApp:
             bd=0,
         )
         self.video_label.pack(fill="both", expand=True)
+
+        stt_output_panel = tk.Frame(video_panel, bg="#0b0f13", height=170)
+        stt_output_panel.pack(fill="x", pady=(12, 0))
+        stt_output_panel.pack_propagate(False)
+
+        tk.Label(
+            stt_output_panel,
+            text=LABEL_STT_RESULT,
+            bg="#0b0f13",
+            fg="#f4f7fb",
+            font=("Malgun Gothic", 12, "bold"),
+            anchor="w",
+        ).pack(fill="x", pady=(0, 6))
+
+        text_shell = tk.Frame(stt_output_panel, bg="#05080c")
+        text_shell.pack(fill="both", expand=True)
+        self.stt_output = tk.Text(
+            text_shell,
+            bg="#05080c",
+            fg="#eaf6ff",
+            insertbackground="#f4f7fb",
+            selectbackground="#284761",
+            relief="flat",
+            wrap="word",
+            font=("Consolas", 11),
+            padx=12,
+            pady=10,
+            height=5,
+        )
+        self.stt_output.pack(side="left", fill="both", expand=True)
+        stt_scrollbar = tk.Scrollbar(text_shell, command=self.stt_output.yview)
+        stt_scrollbar.pack(side="right", fill="y")
+        self.stt_output.configure(yscrollcommand=stt_scrollbar.set)
+        self.append_stt_text("STT ready.\n")
 
         self.update_mode_buttons()
 
@@ -298,6 +460,29 @@ class HolisticGuiApp:
             relief="flat",
             highlightthickness=0,
         )
+
+    def style_option_menu(self, option_menu):
+        option_menu.config(
+            bg="#1f2730",
+            fg="#f4f7fb",
+            activebackground="#27313d",
+            activeforeground="#f4f7fb",
+            highlightthickness=0,
+            relief="flat",
+            font=("Consolas", 9),
+        )
+        option_menu["menu"].config(
+            bg="#1f2730",
+            fg="#f4f7fb",
+            activebackground="#314051",
+            activeforeground="#ffffff",
+        )
+
+    def make_small_option(self, parent, variable, values):
+        option = tk.OptionMenu(parent, variable, *values)
+        self.style_option_menu(option)
+        option.config(font=("Consolas", 8))
+        return option
 
     def make_info_label(self, parent, variable):
         return tk.Label(
@@ -356,6 +541,97 @@ class HolisticGuiApp:
         default_label = f"index {self.camera_candidates[0]['index']} / {self.camera_candidates[0]['backend_label']}"
         self.camera_var.set(default_label)
         self.status_var.set(f"\uc6f9\ucea0 {len(self.camera_candidates)}\uac1c \uac10\uc9c0")
+
+    def refresh_stt_microphones(self, show_error=True):
+        menu = self.stt_mic_menu["menu"]
+        menu.delete(0, "end")
+
+        try:
+            labels = self.stt.refresh_microphones()
+        except Exception as exc:
+            label = "\ub9c8\uc774\ud06c \uc0ac\uc6a9 \ubd88\uac00"
+            self.stt_mic_var.set(label)
+            menu.add_command(label=label, command=lambda value=label: self.stt_mic_var.set(value))
+            self.stt_status_var.set(f"STT \uc900\ube44 \uc2e4\ud328: {exc}")
+            if show_error:
+                messagebox.showerror("STT", str(exc))
+            return
+
+        if not labels:
+            label = "\uc0ac\uc6a9 \uac00\ub2a5\ud55c \ub9c8\uc774\ud06c \uc5c6\uc74c"
+            self.stt_mic_var.set(label)
+            menu.add_command(label=label, command=lambda value=label: self.stt_mic_var.set(value))
+            self.stt_status_var.set("STT: \ub9c8\uc774\ud06c\ub97c \ucc3e\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.")
+            return
+
+        for label in labels:
+            menu.add_command(label=label, command=lambda value=label: self.stt_mic_var.set(value))
+        if self.stt_mic_var.get() not in labels:
+            self.stt_mic_var.set(labels[0])
+        self.stt_status_var.set(f"STT: \ub9c8\uc774\ud06c {len(labels)}\uac1c \uac10\uc9c0")
+
+    def start_stt(self):
+        try:
+            self.stt.start(
+                self.stt_mic_var.get(),
+                self.stt_device_var.get(),
+                self.stt_model_var.get(),
+                self.stt_language_var.get(),
+                self.stt_timestamps_var.get(),
+            )
+        except Exception as exc:
+            self.stt_status_var.set(f"STT \uc2dc\uc791 \uc2e4\ud328: {exc}")
+            messagebox.showerror("STT", str(exc))
+            return
+
+        self.stt_start_button.configure(state="disabled")
+        self.stt_stop_button.configure(state="normal")
+        self.stt_status_var.set("STT: \ubaa8\ub378 \uc900\ube44 \uc911")
+
+    def stop_stt(self):
+        self.stt.stop()
+        self.stt_stop_button.configure(state="disabled")
+        self.stt_status_var.set("STT: \uc911\uc9c0 \uc911")
+
+    def poll_stt_events(self):
+        for kind, value in self.stt.drain_events():
+            if kind == "text":
+                self.append_stt_text(value)
+            elif kind == "status":
+                self.stt_status_var.set(value)
+            elif kind == "error":
+                self.append_stt_text(f"\n[STT error] {value}\n")
+                self.stt_status_var.set(f"STT error: {value}")
+                messagebox.showerror("STT", value)
+            elif kind == "running" and value == "false":
+                self.stt_start_button.configure(state="normal")
+                self.stt_stop_button.configure(state="disabled")
+        self.root.after(100, self.poll_stt_events)
+
+    def append_stt_text(self, text):
+        self.stt_output.insert("end", text)
+        self.stt_output.see("end")
+
+    def clear_stt_text(self):
+        self.stt_output.delete("1.0", "end")
+
+    def save_stt_text(self):
+        text = self.stt_output.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo("STT", "\uc800\uc7a5\ud560 STT \ud14d\uc2a4\ud2b8\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.")
+            return
+
+        default_name = f"stt_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        path = filedialog.asksaveasfilename(
+            title="STT \ud14d\uc2a4\ud2b8 \uc800\uc7a5",
+            defaultextension=".txt",
+            initialfile=default_name,
+            filetypes=(("Text files", "*.txt"), ("All files", "*.*")),
+        )
+        if not path:
+            return
+        Path(path).write_text(text, encoding="utf-8")
+        self.stt_status_var.set(f"STT \uc800\uc7a5 \uc644\ub8cc: {Path(path).name}")
 
     def load_emotion_model(self):
         try:
@@ -1046,6 +1322,7 @@ class HolisticGuiApp:
         return cv2.resize(frame_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
     def on_close(self):
+        self.stt.stop()
         self.release_camera()
         self.holistic.close()
         self.root.destroy()

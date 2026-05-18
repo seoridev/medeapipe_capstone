@@ -195,3 +195,14 @@ https://github.com/seoridev/medeapipe_capstone
 - 조명이 어둡거나 손/얼굴이 화면 밖으로 나가면 인식 정확도가 낮아질 수 있습니다.
 - 손 제스처와 고개 움직임은 랜드마크 기반 규칙 판정이므로 사용자 거리, 손 각도, 카메라 위치에 따라 임계값 조정이 필요할 수 있습니다.
 - 감정 인식 모델 파일이 없으면 감정 인식 기능은 정상 동작하지 않습니다.
+## STT controls
+
+The GUI includes a Faster Whisper STT panel.
+
+1. Select a microphone in the STT section.
+2. Choose device, model, and language.
+3. Press `STT start` to begin microphone transcription.
+4. Press `STT stop` to stop recording.
+5. Use `STT save` or `STT clear` for the transcript box.
+
+The first STT run can take time because Faster Whisper may download the selected model.
