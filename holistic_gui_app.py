@@ -50,6 +50,7 @@ LABEL_MIRROR = "\uc88c\uc6b0 \ubc18\uc804"
 LABEL_INFO_OVERLAY = "\uc88c\uce21 \uc0c1\ub2e8 \uc815\ubcf4"
 LABEL_EMOTION = "\uac10\uc815 \uc778\uc2dd"
 LABEL_STATUS = "\uc0c1\ud0dc"
+LABEL_ALWAYS_RECOGNITION = "\uc0c1\uc2dc \uc778\uc2dd"
 LABEL_STT = "STT"
 LABEL_MIC = "\ub9c8\uc774\ud06c"
 LABEL_STT_REFRESH = "\ub9c8\uc774\ud06c \uc0c8\ub85c\uace0\uce68"
@@ -97,6 +98,7 @@ class HolisticGuiApp:
         self.away_frame_count = 0
         self.emotion_result = None
         self.last_emotion_inference_ms = -EMOTION_INFERENCE_INTERVAL_MS
+        self.always_results = {}
 
         self.camera_var = tk.StringVar()
         self.source_var = tk.StringVar(
@@ -111,6 +113,10 @@ class HolisticGuiApp:
         self.status_var = tk.StringVar(
             value="\ub300\uae30 \uc911"
         )
+        self.always_wave_status_var = tk.StringVar(value=f"{LABEL_WAVE}: -")
+        self.always_gesture_status_var = tk.StringVar(value=f"{LABEL_HAND_GESTURE}: -")
+        self.always_head_status_var = tk.StringVar(value=f"{LABEL_HEAD_GESTURE}: -")
+        self.always_attention_status_var = tk.StringVar(value=f"{LABEL_ATTENTION}: -")
         self.stt_status_var = tk.StringVar(value="STT \ub300\uae30 \uc911")
         self.stt_mic_var = tk.StringVar()
         self.stt_provider_var = tk.StringVar(value="google")
@@ -124,6 +130,10 @@ class HolisticGuiApp:
         self.mirror_var = tk.BooleanVar(value=False)
         self.info_overlay_var = tk.BooleanVar(value=True)
         self.emotion_var = tk.BooleanVar(value=False)
+        self.always_wave_var = tk.BooleanVar(value=True)
+        self.always_gesture_var = tk.BooleanVar(value=True)
+        self.always_head_var = tk.BooleanVar(value=True)
+        self.always_attention_var = tk.BooleanVar(value=True)
         self.stt = RealtimeSTT()
 
         self.holistic = core.mp_holistic.Holistic(
@@ -308,6 +318,14 @@ class HolisticGuiApp:
         self.make_toggle(toggle_frame, LABEL_INFO_OVERLAY, self.info_overlay_var).pack(fill="x", pady=(0, 8))
         self.make_toggle(toggle_frame, LABEL_EMOTION, self.emotion_var).pack(fill="x")
 
+        self.add_section_label(control_panel, LABEL_ALWAYS_RECOGNITION)
+        always_frame = tk.Frame(control_panel, bg="#161c22")
+        always_frame.pack(fill="x", padx=18)
+        self.make_toggle(always_frame, LABEL_WAVE, self.always_wave_var).pack(fill="x", pady=(0, 8))
+        self.make_toggle(always_frame, LABEL_HAND_GESTURE, self.always_gesture_var).pack(fill="x", pady=(0, 8))
+        self.make_toggle(always_frame, LABEL_HEAD_GESTURE, self.always_head_var).pack(fill="x", pady=(0, 8))
+        self.make_toggle(always_frame, LABEL_ATTENTION, self.always_attention_var).pack(fill="x", pady=(0, 8))
+
         self.add_section_label(control_panel, LABEL_STT)
         self.stt_mic_menu = tk.OptionMenu(control_panel, self.stt_mic_var, "")
         self.style_option_menu(self.stt_mic_menu)
@@ -394,6 +412,10 @@ class HolisticGuiApp:
         self.make_info_label(control_panel, self.source_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.mode_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.result_var).pack(fill="x", padx=18, pady=(0, 10))
+        self.make_info_label(control_panel, self.always_wave_status_var).pack(fill="x", padx=18, pady=(0, 10))
+        self.make_info_label(control_panel, self.always_gesture_status_var).pack(fill="x", padx=18, pady=(0, 10))
+        self.make_info_label(control_panel, self.always_head_status_var).pack(fill="x", padx=18, pady=(0, 10))
+        self.make_info_label(control_panel, self.always_attention_status_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.status_var).pack(fill="x", padx=18)
 
         video_title = tk.Label(
@@ -774,6 +796,7 @@ class HolisticGuiApp:
             rps_enabled,
         )
         self.update_emotion_result(frame_bgr, frame_record, timestamp_ms)
+        self.update_always_recognition(frame_record, width)
 
         if self.marker_only_var.get():
             base_frame = np.zeros_like(frame_bgr)
@@ -815,6 +838,57 @@ class HolisticGuiApp:
             self.apply_attention_overlay(frame_bgr, frame_record)
         else:
             self.result_var.set("\ubaa8\ub4dc \uaebc\uc9d0")
+
+    def update_always_recognition(self, frame_record, frame_width):
+        self.always_results = {}
+
+        if self.always_wave_var.get():
+            wave_states = self.update_wave_state(frame_record, frame_width)
+            left_state, right_state = self.get_display_side_values(wave_states)
+            self.always_results["wave"] = {
+                "states": wave_states,
+                "left_state": left_state,
+                "right_state": right_state,
+            }
+            self.always_wave_status_var.set(f"{LABEL_WAVE}: L={left_state}, R={right_state}")
+        else:
+            self.always_wave_status_var.set(f"{LABEL_WAVE}: OFF")
+
+        if self.always_gesture_var.get():
+            gesture_states = self.update_gesture_state(frame_record)
+            left_state, right_state = self.get_display_side_values(gesture_states)
+            self.always_results["gesture"] = {
+                "states": gesture_states,
+                "left_state": left_state,
+                "right_state": right_state,
+            }
+            self.always_gesture_status_var.set(
+                f"{LABEL_HAND_GESTURE}: L={left_state}, R={right_state}"
+            )
+        else:
+            self.always_gesture_status_var.set(f"{LABEL_HAND_GESTURE}: OFF")
+
+        if self.always_head_var.get():
+            head_state, result_state, overlay_state = self.update_head_state(frame_record)
+            self.always_results["head"] = {
+                "state": head_state,
+                "result_state": result_state,
+                "overlay_state": overlay_state,
+            }
+            self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: {result_state}")
+        else:
+            self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: OFF")
+
+        if self.always_attention_var.get():
+            attention_state, result_state, overlay_state = self.update_attention_state(frame_record)
+            self.always_results["attention"] = {
+                "state": attention_state,
+                "result_state": result_state,
+                "overlay_state": overlay_state,
+            }
+            self.always_attention_status_var.set(f"{LABEL_ATTENTION}: {result_state}")
+        else:
+            self.always_attention_status_var.set(f"{LABEL_ATTENTION}: OFF")
 
     def update_emotion_result(self, frame_bgr, frame_record, timestamp_ms):
         if not self.emotion_var.get():
@@ -986,18 +1060,44 @@ class HolisticGuiApp:
         self.draw_mode_text(frame_bgr, "Air Drawing Active")
 
     def apply_wave_overlay(self, frame_bgr, frame_record):
-        self.update_wave_histories(frame_record)
-        wave_states = {
-            side: self.detect_wave(side, frame_bgr.shape[1])
-            for side in ("left", "right")
-        }
-        left_state, right_state = self.get_display_side_values(wave_states)
+        cached = self.always_results.get("wave")
+        if cached is None:
+            cached = {}
+            wave_states = self.update_wave_state(frame_record, frame_bgr.shape[1])
+            cached["states"] = wave_states
+            cached["left_state"], cached["right_state"] = self.get_display_side_values(wave_states)
+
+        wave_states = cached["states"]
+        left_state = cached["left_state"]
+        right_state = cached["right_state"]
         result_text = f"{LABEL_WAVE}: L={left_state}, R={right_state}"
         self.result_var.set(result_text)
         self.draw_hand_state_labels(frame_bgr, frame_record, wave_states)
         self.draw_mode_text(frame_bgr, f"Wave  L:{left_state}  R:{right_state}")
 
+    def update_wave_state(self, frame_record, frame_width):
+        self.update_wave_histories(frame_record)
+        return {
+            side: self.detect_wave(side, frame_width)
+            for side in ("left", "right")
+        }
+
     def apply_gesture_overlay(self, frame_bgr, frame_record):
+        cached = self.always_results.get("gesture")
+        if cached is None:
+            cached = {}
+            gesture_states = self.update_gesture_state(frame_record)
+            cached["states"] = gesture_states
+            cached["left_state"], cached["right_state"] = self.get_display_side_values(gesture_states)
+
+        gesture_states = cached["states"]
+        left_state = cached["left_state"]
+        right_state = cached["right_state"]
+        self.result_var.set(f"{LABEL_HAND_GESTURE}: L={left_state}, R={right_state}")
+        self.draw_hand_state_labels(frame_bgr, frame_record, gesture_states)
+        self.draw_mode_text(frame_bgr, f"Gesture  L:{left_state}  R:{right_state}")
+
+    def update_gesture_state(self, frame_record):
         gesture_states = {
             "left": self.detect_static_hand_gesture(frame_record["left_hand_landmarks"]),
             "right": self.detect_static_hand_gesture(frame_record["right_hand_landmarks"]),
@@ -1006,12 +1106,21 @@ class HolisticGuiApp:
             gesture_states["left"] = "HEART"
             gesture_states["right"] = "HEART"
 
-        left_state, right_state = self.get_display_side_values(gesture_states)
-        self.result_var.set(f"{LABEL_HAND_GESTURE}: L={left_state}, R={right_state}")
-        self.draw_hand_state_labels(frame_bgr, frame_record, gesture_states)
-        self.draw_mode_text(frame_bgr, f"Gesture  L:{left_state}  R:{right_state}")
+        return gesture_states
 
     def apply_head_overlay(self, frame_bgr, frame_record):
+        cached = self.always_results.get("head")
+        if cached is None:
+            head_state, result_state, overlay_state = self.update_head_state(frame_record)
+        else:
+            head_state = cached["state"]
+            result_state = cached["result_state"]
+            overlay_state = cached["overlay_state"]
+
+        self.result_var.set(f"{LABEL_HEAD_GESTURE}: {result_state}")
+        self.draw_mode_text(frame_bgr, f"Head Motion: {overlay_state}")
+
+    def update_head_state(self, frame_record):
         self.update_head_history(frame_record)
         head_state = self.detect_head_motion()
         if head_state == "AGREE":
@@ -1024,10 +1133,21 @@ class HolisticGuiApp:
             result_state = "\uc778\uc2dd \ub300\uae30"
             overlay_state = "WAITING"
 
-        self.result_var.set(f"{LABEL_HEAD_GESTURE}: {result_state}")
-        self.draw_mode_text(frame_bgr, f"Head Motion: {overlay_state}")
+        return head_state, result_state, overlay_state
 
     def apply_attention_overlay(self, frame_bgr, frame_record):
+        cached = self.always_results.get("attention")
+        if cached is None:
+            attention_state, result_state, overlay_state = self.update_attention_state(frame_record)
+        else:
+            attention_state = cached["state"]
+            result_state = cached["result_state"]
+            overlay_state = cached["overlay_state"]
+
+        self.result_var.set(f"{LABEL_ATTENTION}: {result_state}")
+        self.draw_mode_text(frame_bgr, f"Attention: {overlay_state}")
+
+    def update_attention_state(self, frame_record):
         attention_state = self.detect_attention_state(frame_record)
         if attention_state == "SCREEN":
             result_state = "\ud654\uba74 \uc751\uc2dc"
@@ -1042,8 +1162,7 @@ class HolisticGuiApp:
             result_state = "\uc5bc\uad74 \ucc3e\ub294 \uc911"
             overlay_state = "SEARCHING FACE"
 
-        self.result_var.set(f"{LABEL_ATTENTION}: {result_state}")
-        self.draw_mode_text(frame_bgr, f"Attention: {overlay_state}")
+        return attention_state, result_state, overlay_state
 
     def draw_mode_text(self, frame_bgr, text, color=(255, 255, 255)):
         cv2.putText(
