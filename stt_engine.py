@@ -300,6 +300,7 @@ class RealtimeSTT:
         else:
             line = text
         self.ui_queue.put(("text", line + "\n"))
+        self.ui_queue.put(("speech", text))
         self.ui_queue.put(("status", "STT transcribed with Google Web Speech"))
 
     def _to_audio_data(self, audio):

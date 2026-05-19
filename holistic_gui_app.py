@@ -1,5 +1,6 @@
 from collections import deque
 from datetime import datetime
+import json
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -11,6 +12,7 @@ from PIL import Image, ImageTk
 
 import detailed_holistic_tracker as core
 from emotion_recognizer import EmotionRecognizer
+from interaction_event_client import InteractionEventClient
 from project_version import __version__
 from stt_engine import (
     LANGUAGE_OPTIONS,
@@ -95,6 +97,7 @@ class HolisticGuiApp:
         self.emotion_result = None
         self.last_emotion_inference_ms = -EMOTION_INFERENCE_INTERVAL_MS
         self.always_results = {}
+        self.last_sent_interaction_events = {}
 
         self.camera_var = tk.StringVar()
         self.source_var = tk.StringVar(
@@ -140,6 +143,8 @@ class HolisticGuiApp:
         )
         self.emotion_recognizer = None
         self.load_emotion_model()
+        self.event_client = InteractionEventClient()
+        self.event_client.start()
 
         self.build_ui()
         self.refresh_cameras()
@@ -617,6 +622,14 @@ class HolisticGuiApp:
         for kind, value in self.stt.drain_events():
             if kind == "text":
                 self.append_stt_text(value)
+            elif kind == "speech":
+                self.send_interaction_event(
+                    "speech",
+                    {
+                        "type": "speech",
+                        "text": value,
+                    },
+                )
             elif kind == "status":
                 self.stt_status_var.set(value)
             elif kind == "error":
@@ -839,6 +852,16 @@ class HolisticGuiApp:
             "right_state": right_state,
         }
         self.always_wave_status_var.set(f"{LABEL_WAVE}: L={left_state}, R={right_state}")
+        self.send_interaction_event_if_changed(
+            "motion.wave",
+            {
+                "type": "motion",
+                "name": "wave",
+                "left": left_state,
+                "right": right_state,
+                "raw": wave_states,
+            },
+        )
 
         gesture_states = self.update_gesture_state(frame_record)
         left_state, right_state = self.get_display_side_values(gesture_states)
@@ -850,6 +873,16 @@ class HolisticGuiApp:
         self.always_gesture_status_var.set(
             f"{LABEL_HAND_GESTURE}: L={left_state}, R={right_state}"
         )
+        self.send_interaction_event_if_changed(
+            "motion.hand_gesture",
+            {
+                "type": "motion",
+                "name": "hand_gesture",
+                "left": left_state,
+                "right": right_state,
+                "raw": gesture_states,
+            },
+        )
 
         head_state, result_state, overlay_state = self.update_head_state(frame_record)
         self.always_results["head"] = {
@@ -858,6 +891,16 @@ class HolisticGuiApp:
             "overlay_state": overlay_state,
         }
         self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: {result_state}")
+        self.send_interaction_event_if_changed(
+            "motion.head",
+            {
+                "type": "motion",
+                "name": "head",
+                "value": head_state,
+                "label": result_state,
+                "overlay": overlay_state,
+            },
+        )
 
         attention_state, result_state, overlay_state = self.update_attention_state(frame_record)
         self.always_results["attention"] = {
@@ -866,6 +909,26 @@ class HolisticGuiApp:
             "overlay_state": overlay_state,
         }
         self.always_attention_status_var.set(f"{LABEL_ATTENTION}: {result_state}")
+        self.send_interaction_event_if_changed(
+            "motion.attention",
+            {
+                "type": "motion",
+                "name": "attention",
+                "value": attention_state,
+                "label": result_state,
+                "overlay": overlay_state,
+            },
+        )
+
+    def send_interaction_event_if_changed(self, key, event):
+        signature = json.dumps(event, ensure_ascii=False, sort_keys=True)
+        if self.last_sent_interaction_events.get(key) == signature:
+            return
+        self.last_sent_interaction_events[key] = signature
+        self.send_interaction_event(key, event)
+
+    def send_interaction_event(self, key, event):
+        self.event_client.send(event)
 
     def update_emotion_result(self, frame_bgr, frame_record, timestamp_ms):
         if not self.emotion_var.get():
@@ -1474,6 +1537,7 @@ class HolisticGuiApp:
         return cv2.resize(frame_rgb, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
     def on_close(self):
+        self.event_client.stop()
         self.stt.stop()
         self.release_camera()
         self.holistic.close()
