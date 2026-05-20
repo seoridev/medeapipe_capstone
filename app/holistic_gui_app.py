@@ -99,6 +99,8 @@ class HolisticGuiApp:
         self.emotion_result = None
         self.last_emotion_inference_ms = -EMOTION_INFERENCE_INTERVAL_MS
         self.always_results = {}
+        self.mode_result = {"active": None, "result": None}
+        self.latest_speech_text = ""
         self.last_sent_interaction_events = {}
 
         self.camera_var = tk.StringVar()
@@ -625,13 +627,7 @@ class HolisticGuiApp:
             if kind == "text":
                 self.append_stt_text(value)
             elif kind == "speech":
-                self.send_interaction_event(
-                    "speech",
-                    {
-                        "type": "speech",
-                        "text": value,
-                    },
-                )
+                self.latest_speech_text = value
             elif kind == "status":
                 self.stt_status_var.set(value)
             elif kind == "error":
@@ -814,12 +810,14 @@ class HolisticGuiApp:
         self.apply_always_recognition_overlay(annotated)
         self.apply_mode_overlay(annotated, frame_record)
         self.apply_emotion_overlay(annotated)
+        self.send_recognition_state()
         self.render_frame(annotated)
 
         self.frame_index += 1
         self.root.after(15, self.update_frame)
 
     def apply_mode_overlay(self, frame_bgr, frame_record):
+        self.mode_result = {"active": self.active_mode, "result": None}
         if self.active_mode == "rps":
             self.apply_rps_overlay(frame_bgr, frame_record)
         elif self.active_mode == "cham":
@@ -835,17 +833,11 @@ class HolisticGuiApp:
         elif self.active_mode == "attention":
             self.apply_attention_overlay(frame_bgr, frame_record)
         else:
+            self.mode_result = {"active": None, "result": None}
             self.result_var.set("\ubaa8\ub4dc \uaebc\uc9d0")
 
     def update_always_recognition(self, frame_record, frame_width):
         self.always_results = {}
-
-        if not self.always_recognition_var.get():
-            self.always_wave_status_var.set(f"{LABEL_WAVE}: OFF")
-            self.always_gesture_status_var.set(f"{LABEL_HAND_GESTURE}: OFF")
-            self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: OFF")
-            self.always_attention_status_var.set(f"{LABEL_ATTENTION}: OFF")
-            return
 
         wave_states = self.update_wave_state(frame_record, frame_width)
         left_state, right_state = self.get_display_side_values(wave_states)
@@ -854,17 +846,6 @@ class HolisticGuiApp:
             "left_state": left_state,
             "right_state": right_state,
         }
-        self.always_wave_status_var.set(f"{LABEL_WAVE}: L={left_state}, R={right_state}")
-        self.send_interaction_event_if_changed(
-            "motion.wave",
-            {
-                "type": "motion",
-                "name": "wave",
-                "left": left_state,
-                "right": right_state,
-                "raw": wave_states,
-            },
-        )
 
         gesture_states = self.update_gesture_state(frame_record)
         left_state, right_state = self.get_display_side_values(gesture_states)
@@ -873,19 +854,6 @@ class HolisticGuiApp:
             "left_state": left_state,
             "right_state": right_state,
         }
-        self.always_gesture_status_var.set(
-            f"{LABEL_HAND_GESTURE}: L={left_state}, R={right_state}"
-        )
-        self.send_interaction_event_if_changed(
-            "motion.hand_gesture",
-            {
-                "type": "motion",
-                "name": "hand_gesture",
-                "left": left_state,
-                "right": right_state,
-                "raw": gesture_states,
-            },
-        )
 
         head_state, result_state, overlay_state = self.update_head_state(frame_record)
         self.always_results["head"] = {
@@ -893,17 +861,6 @@ class HolisticGuiApp:
             "result_state": result_state,
             "overlay_state": overlay_state,
         }
-        self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: {result_state}")
-        self.send_interaction_event_if_changed(
-            "motion.head",
-            {
-                "type": "motion",
-                "name": "head",
-                "value": head_state,
-                "label": result_state,
-                "overlay": overlay_state,
-            },
-        )
 
         attention_state, result_state, overlay_state = self.update_attention_state(frame_record)
         self.always_results["attention"] = {
@@ -911,16 +868,29 @@ class HolisticGuiApp:
             "result_state": result_state,
             "overlay_state": overlay_state,
         }
-        self.always_attention_status_var.set(f"{LABEL_ATTENTION}: {result_state}")
-        self.send_interaction_event_if_changed(
-            "motion.attention",
-            {
-                "type": "motion",
-                "name": "attention",
-                "value": attention_state,
-                "label": result_state,
-                "overlay": overlay_state,
-            },
+        self.update_always_status_labels()
+
+    def update_always_status_labels(self):
+        if not self.always_recognition_var.get():
+            self.always_wave_status_var.set(f"{LABEL_WAVE}: \uc228\uae40")
+            self.always_gesture_status_var.set(f"{LABEL_HAND_GESTURE}: \uc228\uae40")
+            self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: \uc228\uae40")
+            self.always_attention_status_var.set(f"{LABEL_ATTENTION}: \uc228\uae40")
+            return
+
+        wave = self.always_results.get("wave", {})
+        gesture = self.always_results.get("gesture", {})
+        head = self.always_results.get("head", {})
+        attention = self.always_results.get("attention", {})
+        self.always_wave_status_var.set(
+            f"{LABEL_WAVE}: L={wave.get('left_state', '-')} R={wave.get('right_state', '-')}"
+        )
+        self.always_gesture_status_var.set(
+            f"{LABEL_HAND_GESTURE}: L={gesture.get('left_state', '-')} R={gesture.get('right_state', '-')}"
+        )
+        self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: {head.get('result_state', '-')}")
+        self.always_attention_status_var.set(
+            f"{LABEL_ATTENTION}: {attention.get('result_state', '-')}"
         )
 
     def send_interaction_event_if_changed(self, key, event):
@@ -932,6 +902,57 @@ class HolisticGuiApp:
 
     def send_interaction_event(self, key, event):
         self.event_client.send(event)
+
+    def send_recognition_state(self):
+        event = self.build_recognition_state_event()
+        self.send_interaction_event_if_changed("recognition_state", event)
+
+    def build_recognition_state_event(self):
+        wave = self.always_results.get("wave", {})
+        gesture = self.always_results.get("gesture", {})
+        head = self.always_results.get("head", {})
+        attention = self.always_results.get("attention", {})
+        return {
+            "type": "recognition_state",
+            "always": {
+                "wave": {
+                    "left": wave.get("left_state"),
+                    "right": wave.get("right_state"),
+                    "raw": wave.get("states", {}),
+                },
+                "hand_gesture": {
+                    "left": gesture.get("left_state"),
+                    "right": gesture.get("right_state"),
+                    "raw": gesture.get("states", {}),
+                },
+                "head": {
+                    "value": head.get("state"),
+                    "label": head.get("result_state"),
+                    "overlay": head.get("overlay_state"),
+                },
+                "attention": {
+                    "value": attention.get("state"),
+                    "label": attention.get("result_state"),
+                    "overlay": attention.get("overlay_state"),
+                },
+                "emotion": self.build_emotion_state(),
+            },
+            "mode": self.mode_result,
+            "speech": {
+                "latest_text": self.latest_speech_text,
+            },
+        }
+
+    def build_emotion_state(self):
+        if self.emotion_result is None:
+            return {
+                "label": None,
+                "scores": {},
+            }
+        return {
+            "label": self.emotion_result["label"],
+            "scores": self.emotion_result["scores"],
+        }
 
     def apply_always_recognition_overlay(self, frame_bgr):
         if not self.always_recognition_var.get() or not self.always_results:
@@ -978,10 +999,6 @@ class HolisticGuiApp:
             )
 
     def update_emotion_result(self, frame_bgr, frame_record, timestamp_ms):
-        if not self.emotion_var.get():
-            self.emotion_result = None
-            return
-
         if self.emotion_recognizer is None:
             self.emotion_result = None
             return
@@ -1113,6 +1130,13 @@ class HolisticGuiApp:
     def apply_rps_overlay(self, frame_bgr, frame_record):
         left_state, right_state = self.get_display_hand_states(frame_record)
         self.result_var.set(f"{LABEL_RPS}: L={left_state}, R={right_state}")
+        self.mode_result = {
+            "active": "rps",
+            "result": {
+                "left": left_state,
+                "right": right_state,
+            },
+        }
         text = f"RPS  L:{left_state}  R:{right_state}"
 
         cv2.putText(
@@ -1129,6 +1153,12 @@ class HolisticGuiApp:
     def apply_cham_overlay(self, frame_bgr, frame_record):
         direction = self.detect_face_direction(frame_record["upper_body_landmarks"])
         self.result_var.set(f"{LABEL_CHAM}: {direction}")
+        self.mode_result = {
+            "active": "cham",
+            "result": {
+                "direction": direction,
+            },
+        }
         cv2.putText(
             frame_bgr,
             f"Cham Cham Cham: {direction}",
@@ -1144,6 +1174,14 @@ class HolisticGuiApp:
         self.update_air_paths(frame_record)
         self.draw_air_paths(frame_bgr)
         self.result_var.set("\uc5d0\uc5b4\ub4dc\ub85c\uc789: \uc190\uac00\ub77d \uacbd\ub85c \ud45c\uc2dc \uc911")
+        self.mode_result = {
+            "active": "air",
+            "result": {
+                "active": True,
+                "left_points": len([point for point in self.air_paths["left"] if point is not None]),
+                "right_points": len([point for point in self.air_paths["right"] if point is not None]),
+            },
+        }
         self.draw_mode_text(frame_bgr, "Air Drawing Active")
 
     def apply_wave_overlay(self, frame_bgr, frame_record):
