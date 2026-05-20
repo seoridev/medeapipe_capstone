@@ -49,21 +49,21 @@ pip install -r requirements.txt
 
 이 저장소에는 이미 실행에 필요한 모델 파일이 포함되어 있습니다.
 
-- `pose_landmarker.task`: MediaPipe pose landmarker 관련 모델 파일
-- `epoch72_best_acc_0.8664.pth`: 감정 인식 모델 가중치
+- `models/pose_landmarker.task`: MediaPipe pose landmarker 관련 모델 파일
+- `models/epoch72_best_acc_0.8664.pth`: 감정 인식 모델 가중치
 
 ## 실행 방법
 
 프로젝트 폴더에서 GUI 앱을 실행합니다.
 
 ```powershell
-python holistic_gui_app.py
+python main.py
 ```
 
 만약 `python` 명령이 잡히지 않고 프로젝트의 가상환경을 사용한다면 다음처럼 실행합니다.
 
 ```powershell
-.\.venv\Scripts\python.exe holistic_gui_app.py
+.\.venv\Scripts\python.exe main.py
 ```
 
 ## GUI 사용법
@@ -139,30 +139,28 @@ python holistic_gui_app.py
 
 | 파일 | 역할 |
 | --- | --- |
-| `holistic_gui_app.py` | Tkinter 기반 실시간 GUI 앱입니다. |
-| `detailed_holistic_tracker.py` | MediaPipe Holistic 처리, 랜드마크 변환, 기본 제스처 분석 코어입니다. |
-| `emotion_recognizer.py` | 감정 인식 모델 구조와 추론 로직입니다. |
-| `project_version.py` | 현재 앱 버전 값을 관리합니다. |
+| `main.py` | GUI 실행 진입점입니다. |
+| `app/` | Tkinter GUI와 앱 버전 정보를 관리합니다. |
+| `recognition/` | MediaPipe Holistic, 감정 인식, STT 인식 로직입니다. |
+| `bridge/` | JSON 이벤트 송수신 및 로그 확인 도구입니다. |
+| `models/` | MediaPipe/감정 인식 모델 파일입니다. |
+| `media/` | 테스트용 영상 파일입니다. |
+| `docs/` | 변경 기록과 개발 기능 문서입니다. |
 | `VERSION` | 현재 버전을 텍스트로 기록합니다. |
 | `requirements.txt` | 프로젝트 실행에 필요한 Python 패키지 목록입니다. |
-| `CHANGELOG.md` | 버전별 변경 내용을 기록합니다. |
-| `DEVELOPED_FEATURES.md` | 개발된 기능 상세 정리 문서입니다. |
-| `input.mp4`, `test01.mp4` | 테스트용 영상 파일입니다. |
-| `pose_landmarker.task` | MediaPipe 관련 모델 파일입니다. |
-| `epoch72_best_acc_0.8664.pth` | 감정 인식 모델 가중치입니다. |
 
 ## 배치 영상 처리
 
-GUI가 아니라 영상 파일을 처리하고 싶다면 `detailed_holistic_tracker.py`를 사용할 수 있습니다.
+GUI가 아니라 영상 파일을 처리하고 싶다면 `recognition/holistic_tracker.py`를 사용할 수 있습니다.
 
 ```powershell
-python detailed_holistic_tracker.py --input test01.mp4 --output-video output_holistic_detailed.mp4 --output-json holistic_detailed_landmarks.json
+python recognition/holistic_tracker.py --input media/test01.mp4 --output-video output_holistic_detailed.mp4 --output-json holistic_detailed_landmarks.json
 ```
 
 가상환경 Python을 사용할 경우:
 
 ```powershell
-.\.venv\Scripts\python.exe detailed_holistic_tracker.py --input test01.mp4 --output-video output_holistic_detailed.mp4 --output-json holistic_detailed_landmarks.json
+.\.venv\Scripts\python.exe recognition/holistic_tracker.py --input media/test01.mp4 --output-video output_holistic_detailed.mp4 --output-json holistic_detailed_landmarks.json
 ```
 
 ## 버전 관리
@@ -178,7 +176,7 @@ v0.1.0: 버전 메타데이터와 새 인식 모드가 포함된 현재 버전
 
 ```text
 VERSION
-project_version.py
+app/project_version.py
 ```
 
 ## GitHub 저장소

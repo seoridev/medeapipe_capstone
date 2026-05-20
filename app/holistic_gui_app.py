@@ -10,11 +10,11 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-import detailed_holistic_tracker as core
-from emotion_recognizer import EmotionRecognizer
-from interaction_event_client import InteractionEventClient
-from project_version import __version__
-from stt_engine import (
+from app.project_version import __version__
+from bridge.interaction_event_client import InteractionEventClient
+from recognition import holistic_tracker as core
+from recognition.emotion_recognizer import EmotionRecognizer
+from recognition.stt_engine import (
     LANGUAGE_OPTIONS,
     PROVIDER_OPTIONS,
     SENSITIVITY_OPTIONS,
@@ -25,6 +25,8 @@ from stt_engine import (
 
 DISPLAY_WIDTH = 960
 DISPLAY_HEIGHT = 540
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+EMOTION_MODEL_PATH = PROJECT_ROOT / "models" / "epoch72_best_acc_0.8664.pth"
 EMOTION_INFERENCE_INTERVAL_MS = 150
 EMOTION_NEUTRAL_CONFIDENCE_THRESHOLD = 0.50
 EMOTION_NEUTRAL_MARGIN_THRESHOLD = 0.15
@@ -668,7 +670,7 @@ class HolisticGuiApp:
 
     def load_emotion_model(self):
         try:
-            self.emotion_recognizer = EmotionRecognizer("epoch72_best_acc_0.8664.pth")
+            self.emotion_recognizer = EmotionRecognizer(EMOTION_MODEL_PATH)
         except Exception as exc:
             self.emotion_recognizer = None
             self.status_var.set(f"\uac10\uc815 \ubaa8\ub378 \ub85c\ub4dc \uc2e4\ud328: {exc}")
