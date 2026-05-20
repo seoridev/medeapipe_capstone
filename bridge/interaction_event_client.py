@@ -1,3 +1,5 @@
+#모션, 감정, 음성 인식 후 json파일로 보내는 거
+
 from __future__ import annotations
 
 import json

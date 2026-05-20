@@ -1,3 +1,5 @@
+# json 파일 실시간으로 받는 예시 코드
+
 from __future__ import annotations
 
 import json
