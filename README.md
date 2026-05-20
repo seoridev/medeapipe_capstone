@@ -66,6 +66,12 @@ python main.py
 .\.venv\Scripts\python.exe main.py
 ```
 
+JSON 로그를 확인하려면 다른 터미널에서 수신기를 실행합니다.
+
+```powershell
+.\.venv\Scripts\python.exe receiver.py
+```
+
 ## GUI 사용법
 
 1. 앱을 실행합니다.
@@ -140,6 +146,7 @@ python main.py
 | 파일 | 역할 |
 | --- | --- |
 | `main.py` | GUI 실행 진입점입니다. |
+| `receiver.py` | JSON 인식 상태 로그 수신 진입점입니다. |
 | `app/` | Tkinter GUI와 앱 버전 정보를 관리합니다. |
 | `recognition/` | MediaPipe Holistic, 감정 인식, STT 인식 로직입니다. |
 | `bridge/` | JSON 이벤트 송수신 및 로그 확인 도구입니다. |
