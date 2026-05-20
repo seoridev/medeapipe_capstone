@@ -811,6 +811,7 @@ class HolisticGuiApp:
             hand_label_side_map=self.get_hand_label_side_map(),
         )
 
+        self.apply_always_recognition_overlay(annotated)
         self.apply_mode_overlay(annotated, frame_record)
         self.apply_emotion_overlay(annotated)
         self.render_frame(annotated)
@@ -931,6 +932,50 @@ class HolisticGuiApp:
 
     def send_interaction_event(self, key, event):
         self.event_client.send(event)
+
+    def apply_always_recognition_overlay(self, frame_bgr):
+        if not self.always_recognition_var.get() or not self.always_results:
+            return
+
+        wave = self.always_results.get("wave", {})
+        gesture = self.always_results.get("gesture", {})
+        head = self.always_results.get("head", {})
+        attention = self.always_results.get("attention", {})
+        lines = [
+            "Always Recognition",
+            f"Wave: L={wave.get('left_state', '-')} R={wave.get('right_state', '-')}",
+            f"Gesture: L={gesture.get('left_state', '-')} R={gesture.get('right_state', '-')}",
+            f"Head: {head.get('overlay_state', '-')}",
+            f"Attention: {attention.get('overlay_state', '-')}",
+        ]
+
+        box_width = 430
+        line_height = 28
+        box_height = 24 + (len(lines) * line_height)
+        x1 = 20
+        y1 = max(20, frame_bgr.shape[0] - box_height - 72)
+        x2 = x1 + box_width
+        y2 = y1 + box_height
+
+        overlay = frame_bgr.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (15, 20, 26), -1)
+        cv2.addWeighted(overlay, 0.72, frame_bgr, 0.28, 0, frame_bgr)
+        cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (127, 209, 185), 2)
+
+        for index, line in enumerate(lines):
+            color = (127, 209, 185) if index == 0 else (240, 245, 250)
+            scale = 0.68 if index == 0 else 0.58
+            thickness = 2 if index == 0 else 1
+            cv2.putText(
+                frame_bgr,
+                line,
+                (x1 + 14, y1 + 30 + (index * line_height)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
 
     def update_emotion_result(self, frame_bgr, frame_record, timestamp_ms):
         if not self.emotion_var.get():
