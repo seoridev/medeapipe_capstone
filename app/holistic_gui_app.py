@@ -47,6 +47,9 @@ LABEL_WAVE = "\uc190 \ud754\ub4e4\uae30"
 LABEL_HAND_GESTURE = "\uc5c4\uc9c0\ucc99/\ud558\ud2b8/OK"
 LABEL_HEAD_GESTURE = "\uace0\uac1c \ub044\ub355/\uc813\uae30"
 LABEL_ATTENTION = "\uc751\uc2dc/\uc790\ub9ac\ube44\uc6c0"
+LABEL_POSTURE = "\uc790\uc138 \ud310\uc815"
+LABEL_BLINK = "\ub208\uae5c\ube61\uc784"
+LABEL_CLAP = "\ubc15\uc218"
 LABEL_TOGGLES = "\ud1a0\uae00"
 LABEL_TRACKING = "\ud2b8\ub798\ud0b9 \ud45c\uc2dc"
 LABEL_MARKER_ONLY = "\uac80\uc740\ud654\uba74 \ub9c8\ucee4\ub9cc"
@@ -68,6 +71,7 @@ MODE_LABELS = {
     "rps": LABEL_RPS,
     "cham": LABEL_CHAM,
     "air": LABEL_AIR,
+    "posture": LABEL_POSTURE,
 }
 
 
@@ -96,6 +100,13 @@ class HolisticGuiApp:
         self.wave_histories = {"left": deque(maxlen=30), "right": deque(maxlen=30)}
         self.head_history = deque(maxlen=36)
         self.away_frame_count = 0
+        self.blink_was_closed = False
+        self.blink_hold_frames = 0
+        self.blink_count = 0
+        self.clap_was_close = False
+        self.clap_hold_frames = 0
+        self.clap_cooldown_frames = 0
+        self.clap_count = 0
         self.emotion_result = None
         self.last_emotion_inference_ms = -EMOTION_INFERENCE_INTERVAL_MS
         self.always_results = {}
@@ -120,6 +131,8 @@ class HolisticGuiApp:
         self.always_gesture_status_var = tk.StringVar(value=f"{LABEL_HAND_GESTURE}: -")
         self.always_head_status_var = tk.StringVar(value=f"{LABEL_HEAD_GESTURE}: -")
         self.always_attention_status_var = tk.StringVar(value=f"{LABEL_ATTENTION}: -")
+        self.always_blink_status_var = tk.StringVar(value=f"{LABEL_BLINK}: -")
+        self.always_clap_status_var = tk.StringVar(value=f"{LABEL_CLAP}: -")
         self.stt_status_var = tk.StringVar(value="STT \ub300\uae30 \uc911")
         self.stt_mic_var = tk.StringVar()
         self.stt_provider_var = tk.StringVar(value="google")
@@ -283,6 +296,7 @@ class HolisticGuiApp:
             ("rps", LABEL_RPS),
             ("cham", LABEL_CHAM),
             ("air", LABEL_AIR),
+            ("posture", LABEL_POSTURE),
         )):
             button = tk.Button(
                 mode_grid,
@@ -407,6 +421,8 @@ class HolisticGuiApp:
         self.make_info_label(control_panel, self.always_gesture_status_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.always_head_status_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.always_attention_status_var).pack(fill="x", padx=18, pady=(0, 10))
+        self.make_info_label(control_panel, self.always_blink_status_var).pack(fill="x", padx=18, pady=(0, 10))
+        self.make_info_label(control_panel, self.always_clap_status_var).pack(fill="x", padx=18, pady=(0, 10))
         self.make_info_label(control_panel, self.status_var).pack(fill="x", padx=18)
 
         video_title = tk.Label(
@@ -741,6 +757,11 @@ class HolisticGuiApp:
         self.wave_histories = {"left": deque(maxlen=30), "right": deque(maxlen=30)}
         self.head_history = deque(maxlen=36)
         self.away_frame_count = 0
+        self.blink_was_closed = False
+        self.blink_hold_frames = 0
+        self.clap_was_close = False
+        self.clap_hold_frames = 0
+        self.clap_cooldown_frames = 0
 
     def release_camera(self):
         if self.cap is not None:
@@ -832,6 +853,8 @@ class HolisticGuiApp:
             self.apply_head_overlay(frame_bgr, frame_record)
         elif self.active_mode == "attention":
             self.apply_attention_overlay(frame_bgr, frame_record)
+        elif self.active_mode == "posture":
+            self.apply_posture_overlay(frame_bgr, frame_record)
         else:
             self.mode_result = {"active": None, "result": None}
             self.result_var.set("\ubaa8\ub4dc \uaebc\uc9d0")
@@ -868,6 +891,12 @@ class HolisticGuiApp:
             "result_state": result_state,
             "overlay_state": overlay_state,
         }
+
+        blink_state = self.update_blink_state(frame_record)
+        self.always_results["blink"] = blink_state
+
+        clap_state = self.update_clap_state(frame_record, frame_width)
+        self.always_results["clap"] = clap_state
         self.update_always_status_labels()
 
     def update_always_status_labels(self):
@@ -876,12 +905,16 @@ class HolisticGuiApp:
             self.always_gesture_status_var.set(f"{LABEL_HAND_GESTURE}: \uc228\uae40")
             self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: \uc228\uae40")
             self.always_attention_status_var.set(f"{LABEL_ATTENTION}: \uc228\uae40")
+            self.always_blink_status_var.set(f"{LABEL_BLINK}: \uc228\uae40")
+            self.always_clap_status_var.set(f"{LABEL_CLAP}: \uc228\uae40")
             return
 
         wave = self.always_results.get("wave", {})
         gesture = self.always_results.get("gesture", {})
         head = self.always_results.get("head", {})
         attention = self.always_results.get("attention", {})
+        blink = self.always_results.get("blink", {})
+        clap = self.always_results.get("clap", {})
         self.always_wave_status_var.set(
             f"{LABEL_WAVE}: L={wave.get('left_state', '-')} R={wave.get('right_state', '-')}"
         )
@@ -891,6 +924,12 @@ class HolisticGuiApp:
         self.always_head_status_var.set(f"{LABEL_HEAD_GESTURE}: {head.get('result_state', '-')}")
         self.always_attention_status_var.set(
             f"{LABEL_ATTENTION}: {attention.get('result_state', '-')}"
+        )
+        self.always_blink_status_var.set(
+            f"{LABEL_BLINK}: {blink.get('label', '-')} / {blink.get('count', 0)}"
+        )
+        self.always_clap_status_var.set(
+            f"{LABEL_CLAP}: {clap.get('label', '-')} / {clap.get('count', 0)}"
         )
 
     def send_interaction_event_if_changed(self, key, event):
@@ -912,6 +951,8 @@ class HolisticGuiApp:
         gesture = self.always_results.get("gesture", {})
         head = self.always_results.get("head", {})
         attention = self.always_results.get("attention", {})
+        blink = self.always_results.get("blink", {})
+        clap = self.always_results.get("clap", {})
         return {
             "type": "recognition_state",
             "always": {
@@ -934,6 +975,18 @@ class HolisticGuiApp:
                     "value": attention.get("state"),
                     "label": attention.get("result_state"),
                     "overlay": attention.get("overlay_state"),
+                },
+                "blink": {
+                    "value": blink.get("state"),
+                    "label": blink.get("label"),
+                    "count": blink.get("count"),
+                    "ear": blink.get("ear"),
+                },
+                "clap": {
+                    "value": clap.get("state"),
+                    "label": clap.get("label"),
+                    "count": clap.get("count"),
+                    "distance": clap.get("distance"),
                 },
                 "emotion": self.build_emotion_state(),
             },
@@ -962,15 +1015,19 @@ class HolisticGuiApp:
         gesture = self.always_results.get("gesture", {})
         head = self.always_results.get("head", {})
         attention = self.always_results.get("attention", {})
+        blink = self.always_results.get("blink", {})
+        clap = self.always_results.get("clap", {})
         lines = [
             "Always Recognition",
             f"Wave: L={wave.get('left_state', '-')} R={wave.get('right_state', '-')}",
             f"Gesture: L={gesture.get('left_state', '-')} R={gesture.get('right_state', '-')}",
             f"Head: {head.get('overlay_state', '-')}",
             f"Attention: {attention.get('overlay_state', '-')}",
+            f"Blink: {blink.get('state', '-')}  Count:{blink.get('count', 0)}",
+            f"Clap: {clap.get('state', '-')}  Count:{clap.get('count', 0)}",
         ]
 
-        box_width = 430
+        box_width = 460
         line_height = 28
         box_height = 24 + (len(lines) * line_height)
         x1 = 20
@@ -1288,6 +1345,252 @@ class HolisticGuiApp:
             overlay_state = "SEARCHING FACE"
 
         return attention_state, result_state, overlay_state
+
+    def apply_posture_overlay(self, frame_bgr, frame_record):
+        state = self.detect_posture_state(frame_record)
+        self.result_var.set(f"{LABEL_POSTURE}: {state['label']}")
+        self.mode_result = {
+            "active": "posture",
+            "result": state,
+        }
+        self.draw_posture_guides(frame_bgr, frame_record, state["state"])
+        self.draw_mode_text(frame_bgr, f"Posture: {state['state']}")
+
+    def detect_posture_state(self, frame_record):
+        upper_body = frame_record["upper_body_landmarks"]
+        left_shoulder = core.point_from_record(upper_body.get("LEFT_SHOULDER"))
+        right_shoulder = core.point_from_record(upper_body.get("RIGHT_SHOULDER"))
+        left_hip = core.point_from_record(upper_body.get("LEFT_HIP"))
+        right_hip = core.point_from_record(upper_body.get("RIGHT_HIP"))
+        nose = core.point_from_record(upper_body.get("NOSE"))
+
+        if left_shoulder is None or right_shoulder is None:
+            return {
+                "state": "NO_POSE",
+                "label": "\uc790\uc138 \ucc3e\ub294 \uc911",
+                "metrics": {},
+            }
+
+        shoulder_width = core.distance_between_points(left_shoulder, right_shoulder)
+        if shoulder_width is None or shoulder_width <= 0:
+            return {
+                "state": "NO_POSE",
+                "label": "\uc790\uc138 \ucc3e\ub294 \uc911",
+                "metrics": {},
+            }
+
+        shoulder_center = (
+            (left_shoulder[0] + right_shoulder[0]) / 2,
+            (left_shoulder[1] + right_shoulder[1]) / 2,
+        )
+        shoulder_tilt_ratio = (left_shoulder[1] - right_shoulder[1]) / shoulder_width
+
+        hip_center = None
+        torso_height = shoulder_width
+        if left_hip is not None and right_hip is not None:
+            hip_center = (
+                (left_hip[0] + right_hip[0]) / 2,
+                (left_hip[1] + right_hip[1]) / 2,
+            )
+            measured_height = abs(hip_center[1] - shoulder_center[1])
+            if measured_height > 0:
+                torso_height = measured_height
+
+        metrics = {
+            "shoulder_tilt_ratio": round(shoulder_tilt_ratio, 3),
+            "shoulder_width_px": round(shoulder_width, 2),
+        }
+
+        if nose is not None:
+            head_drop_ratio = (nose[1] - shoulder_center[1]) / max(torso_height, 1)
+            metrics["head_drop_ratio"] = round(head_drop_ratio, 3)
+            if head_drop_ratio > -0.18:
+                return {
+                    "state": "HEAD_DOWN",
+                    "label": "\uace0\uac1c \uc219\uc784",
+                    "metrics": metrics,
+                }
+
+        if abs(shoulder_tilt_ratio) >= 0.12:
+            return {
+                "state": "SHOULDER_TILT",
+                "label": "\uc5b4\uae68 \uae30\uc6b8\uc5b4\uc9d0",
+                "metrics": metrics,
+            }
+
+        if hip_center is not None:
+            lean_ratio = (shoulder_center[0] - hip_center[0]) / shoulder_width
+            metrics["lean_ratio"] = round(lean_ratio, 3)
+            if lean_ratio <= -0.16:
+                return {
+                    "state": "LEAN_LEFT",
+                    "label": "\uc67c\ucabd\uc73c\ub85c \uae30\uc6b8\uc5b4\uc9d0",
+                    "metrics": metrics,
+                }
+            if lean_ratio >= 0.16:
+                return {
+                    "state": "LEAN_RIGHT",
+                    "label": "\uc624\ub978\ucabd\uc73c\ub85c \uae30\uc6b8\uc5b4\uc9d0",
+                    "metrics": metrics,
+                }
+
+        return {
+            "state": "GOOD",
+            "label": "\uc88b\uc740 \uc790\uc138",
+            "metrics": metrics,
+        }
+
+    def draw_posture_guides(self, frame_bgr, frame_record, state):
+        upper_body = frame_record["upper_body_landmarks"]
+        points = {
+            name: core.point_from_record(upper_body.get(name))
+            for name in ("LEFT_SHOULDER", "RIGHT_SHOULDER", "LEFT_HIP", "RIGHT_HIP", "NOSE")
+        }
+        color = (127, 209, 185) if state == "GOOD" else (0, 210, 255)
+        if points["LEFT_SHOULDER"] is not None and points["RIGHT_SHOULDER"] is not None:
+            cv2.line(
+                frame_bgr,
+                points["LEFT_SHOULDER"],
+                points["RIGHT_SHOULDER"],
+                color,
+                4,
+                cv2.LINE_AA,
+            )
+        if points["LEFT_HIP"] is not None and points["RIGHT_HIP"] is not None:
+            cv2.line(
+                frame_bgr,
+                points["LEFT_HIP"],
+                points["RIGHT_HIP"],
+                color,
+                3,
+                cv2.LINE_AA,
+            )
+        for point in points.values():
+            if point is not None:
+                cv2.circle(frame_bgr, point, 6, color, -1, cv2.LINE_AA)
+
+    def update_blink_state(self, frame_record):
+        ear = self.calculate_eye_aspect_ratio(frame_record["face_landmarks"])
+        if ear is None:
+            self.blink_was_closed = False
+            return {
+                "state": "NO_FACE",
+                "label": "\uc5bc\uad74 \ucc3e\ub294 \uc911",
+                "count": self.blink_count,
+                "ear": None,
+            }
+
+        closed = ear < 0.19
+        if closed:
+            self.blink_was_closed = True
+            state = "CLOSED"
+            label = "\ub208 \uac10\uc74c"
+        elif self.blink_was_closed:
+            self.blink_count += 1
+            self.blink_was_closed = False
+            self.blink_hold_frames = 10
+            state = "BLINK"
+            label = "\uae5c\ube61\uc784 \uac10\uc9c0"
+        elif self.blink_hold_frames > 0:
+            self.blink_hold_frames -= 1
+            state = "BLINK"
+            label = "\uae5c\ube61\uc784 \uac10\uc9c0"
+        else:
+            state = "OPEN"
+            label = "\ub208 \ub728\uc9d0"
+
+        return {
+            "state": state,
+            "label": label,
+            "count": self.blink_count,
+            "ear": round(ear, 3),
+        }
+
+    def calculate_eye_aspect_ratio(self, face_records):
+        if not face_records:
+            return None
+
+        face_map = {record["index"]: record for record in face_records}
+        left_eye = (33, 160, 158, 133, 153, 144)
+        right_eye = (362, 385, 387, 263, 373, 380)
+        ratios = []
+        for indexes in (left_eye, right_eye):
+            points = [core.point_from_record(face_map.get(index)) for index in indexes]
+            if any(point is None for point in points):
+                continue
+            horizontal = core.distance_between_points(points[0], points[3])
+            vertical_a = core.distance_between_points(points[1], points[5])
+            vertical_b = core.distance_between_points(points[2], points[4])
+            if horizontal is None or horizontal <= 0:
+                continue
+            ratios.append((vertical_a + vertical_b) / (2.0 * horizontal))
+
+        if not ratios:
+            return None
+        return sum(ratios) / len(ratios)
+
+    def update_clap_state(self, frame_record, frame_width):
+        left_anchor = core.hand_anchor_point(frame_record["left_hand_landmarks"])
+        right_anchor = core.hand_anchor_point(frame_record["right_hand_landmarks"])
+        if left_anchor is None or right_anchor is None:
+            self.clap_was_close = False
+            self.clap_cooldown_frames = max(0, self.clap_cooldown_frames - 1)
+            return {
+                "state": "NO_HANDS",
+                "label": "\uc591\uc190 \ucc3e\ub294 \uc911",
+                "count": self.clap_count,
+                "distance": None,
+            }
+
+        distance = core.distance_between_points(left_anchor, right_anchor)
+        shoulder_width = self.get_shoulder_width(frame_record)
+        close_threshold = max(55, min(frame_width * 0.16, shoulder_width * 0.38))
+        open_threshold = close_threshold * 1.65
+
+        if self.clap_cooldown_frames > 0:
+            self.clap_cooldown_frames -= 1
+
+        if (
+            distance is not None
+            and distance <= close_threshold
+            and not self.clap_was_close
+            and self.clap_cooldown_frames <= 0
+        ):
+            self.clap_count += 1
+            self.clap_was_close = True
+            self.clap_hold_frames = 10
+            self.clap_cooldown_frames = 12
+            state = "CLAP"
+            label = "\ubc15\uc218 \uac10\uc9c0"
+        else:
+            if distance is not None and distance >= open_threshold:
+                self.clap_was_close = False
+            if self.clap_hold_frames > 0:
+                self.clap_hold_frames -= 1
+                state = "CLAP"
+                label = "\ubc15\uc218 \uac10\uc9c0"
+            elif self.clap_was_close:
+                state = "CLOSE"
+                label = "\uc190 \uac00\uae4c\uc6c0"
+            else:
+                state = "READY"
+                label = "\ub300\uae30"
+
+        return {
+            "state": state,
+            "label": label,
+            "count": self.clap_count,
+            "distance": round(distance, 2) if distance is not None else None,
+        }
+
+    def get_shoulder_width(self, frame_record):
+        upper_body = frame_record["upper_body_landmarks"]
+        left_shoulder = core.point_from_record(upper_body.get("LEFT_SHOULDER"))
+        right_shoulder = core.point_from_record(upper_body.get("RIGHT_SHOULDER"))
+        shoulder_width = core.distance_between_points(left_shoulder, right_shoulder)
+        if shoulder_width is None or shoulder_width <= 0:
+            return 240
+        return shoulder_width
 
     def draw_mode_text(self, frame_bgr, text, color=(255, 255, 255)):
         cv2.putText(
